@@ -42,26 +42,28 @@ with app.app_context():
 def not_found_error(e):
     if request.path.startswith("/api/"):
         return jsonify({"error": "API endpoint not found"}), 404
-    return send_from_directory("static", "index.html")
+    return send_from_directory(".", "index.html")
 
 @app.errorhandler(500)
 def internal_error(e):
     if request.path.startswith("/api/"):
         return jsonify({"error": "Internal server error"}), 500
-    return send_from_directory("static", "index.html")
+    return send_from_directory(".", "index.html")
 
 # Static Page Routes
 @app.route("/")
 def index():
-    return send_from_directory("static", "index.html")
+    return send_from_directory(".", "index.html")
 
 @app.route("/<path:path>")
 def static_proxy(path):
     if path.startswith("api/"):
         return jsonify({"error": "API endpoint not found"}), 404
+    if os.path.exists(path):
+        return send_from_directory(".", path)
     if os.path.exists(os.path.join("static", path)):
         return send_from_directory("static", path)
-    return send_from_directory("static", "index.html")
+    return send_from_directory(".", "index.html")
 
 # --- AUTH API ---
 @app.route("/api/auth/register", methods=["POST"])
