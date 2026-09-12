@@ -1,5 +1,7 @@
 /* Taskora API Client */
 const API = {
+  forceOffline: false,
+
   getToken() {
     return localStorage.getItem("taskora_token") || "";
   },
@@ -12,7 +14,25 @@ const API = {
     }
   },
 
+  isStaticHost() {
+    const host = window.location.hostname || "";
+    const protocol = window.location.protocol || "";
+    return (
+      host.endsWith("github.io") ||
+      host.endsWith("netlify.app") ||
+      host.endsWith("vercel.app") ||
+      protocol === "file:" ||
+      this.forceOffline
+    );
+  },
+
   async request(endpoint, method = "GET", body = null) {
+    // 1. Immediate static host bypass (e.g. GitHub Pages / static deployments)
+    if (this.isStaticHost()) {
+      console.log(`[Taskora Static Engine] Handling ${method} ${endpoint} locally via LocalStorage.`);
+      return this.handleOfflineRequest(endpoint, method, body);
+    }
+
     const headers = {
       "Content-Type": "application/json"
     };
@@ -34,9 +54,9 @@ const API = {
     try {
       const response = await fetch(endpoint, config);
 
-      // If static host detected (e.g. GitHub Pages returning 405 Method Not Allowed or 404 for API endpoints)
       if (response.status === 405 || (response.status === 404 && endpoint.startsWith("/api/"))) {
-        console.warn(`[Taskora] Static host detected (HTTP ${response.status}). Executing in Client-Side LocalStorage mode.`);
+        console.warn(`[Taskora] Static host HTTP ${response.status} detected. Switching to LocalStorage mode.`);
+        this.forceOffline = true;
         return this.handleOfflineRequest(endpoint, method, body);
       }
 
