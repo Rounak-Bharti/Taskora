@@ -33,15 +33,10 @@ venv/
 *.swp
 *.swo
 
-# Android / Gradle
-android-app/.gradle/
-android-app/app/build/
-android-app/build/
-android-app/local.properties
-.navigation/
-captures/
-*.apk
-*.aar
+# Mobile App Exclusions (Website Only Repository)
+android-app/
+TaskoraMobileLauncher.java
+TaskoraMobileLauncher*.class
 
 # OS / Environment
 .DS_Store
