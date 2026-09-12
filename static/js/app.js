@@ -1087,9 +1087,25 @@ const App = {
       </div>
 
       <div class="card" style="max-width: 600px;">
-        <h3 class="section-title" style="color: var(--danger);">Data Export & Danger Zone</h3>
-        <div style="display: flex; gap: 1rem;">
-          <button class="btn btn-secondary" onclick="App.exportUserData()">Export Data (JSON)</button>
+        <h3 class="section-title">📊 Data Export & Performance Reports</h3>
+        <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1.25rem;">
+          Download your routine tasks, quality ratings, habit streaks, and reflections as Excel spreadsheets or printable PDF documents.
+        </p>
+
+        <div style="display: flex; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1.5rem;">
+          <button class="btn btn-primary" onclick="App.exportToExcel()" style="flex: 1; min-width: 160px;">
+            📊 Export to Excel (.CSV)
+          </button>
+          <button class="btn btn-secondary" onclick="App.exportToPDF()" style="flex: 1; min-width: 160px;">
+            📄 Export PDF Report
+          </button>
+          <button class="btn btn-secondary" onclick="App.exportUserData()" style="flex: 1; min-width: 140px;">
+            💾 JSON Backup
+          </button>
+        </div>
+
+        <div style="border-top: 1px solid var(--border-color); padding-top: 1rem;">
+          <h4 style="font-size: 0.95rem; font-weight: 700; color: var(--danger); margin-bottom: 0.5rem;">Danger Zone</h4>
           <button class="btn btn-danger" onclick="App.deleteUserAccount()">Delete Account</button>
         </div>
       </div>
@@ -1553,7 +1569,207 @@ const App = {
     a.href = url;
     a.download = "taskora-export.json";
     a.click();
-    this.showToast("Data exported!");
+    this.showToast("JSON Data exported!");
+  },
+
+  async exportToExcel() {
+    try {
+      const data = await API.exportData();
+      const user = this.currentUser || { name: "Taskora User", email: "" };
+      const tasks = data.tasks || [];
+      const habits = data.habits || [];
+      const reflections = data.reflections || {};
+
+      let csv = "\uFEFF"; // UTF-8 BOM for Excel compatibility
+
+      // Summary Header
+      csv += "TASKORA ROUTINE & PERFORMANCE REPORT\n";
+      csv += `User,${(user.name || 'User').replace(/,/g, ' ')} (${(user.email || '').replace(/,/g, ' ')})\n`;
+      csv += `Export Date,${new Date().toLocaleString()}\n\n`;
+
+      // Tasks Table
+      csv += "--- ROUTINE TASKS ---\n";
+      csv += "Task ID,Title,Category,Due Date,Scheduled Time,Priority,Status,Quality Rating (1-5),Est Duration (mins),Act Duration (mins),Notes\n";
+      tasks.forEach(t => {
+        const title = `"${(t.title || '').replace(/"/g, '""')}"`;
+        const cat = `"${(t.category || '').replace(/"/g, '""')}"`;
+        const note = `"${(t.note || '').replace(/"/g, '""')}"`;
+        csv += `${t.id || ''},${title},${cat},${t.due_date || ''},${t.due_time || ''},${t.priority || 'medium'},${t.status || 'not_started'},${t.quality_rating || '-'},${t.estimated_duration || 30},${t.actual_duration || '-'},${note}\n`;
+      });
+      csv += "\n";
+
+      // Habits Table
+      csv += "--- HABITS TRACKERS ---\n";
+      csv += "Habit ID,Name,Category,Habit Type,Target Value,Current Streak (Days),Completed Today\n";
+      habits.forEach(h => {
+        const name = `"${(h.name || '').replace(/"/g, '""')}"`;
+        csv += `${h.id || ''},${name},${h.category || 'General'},${h.habit_type || 'yes_no'},${h.target_value || 1},${h.current_streak || 0},${h.completed_today ? 'Yes' : 'No'}\n`;
+      });
+      csv += "\n";
+
+      // Reflections Table
+      csv += "--- DAILY REFLECTIONS ---\n";
+      csv += "Date,Went Well,Failed / Missed,Why Missed,Improve Tomorrow,Energy (1-5),Mood (1-5)\n";
+      if (typeof reflections === 'object') {
+        Object.keys(reflections).forEach(dateStr => {
+          const r = reflections[dateStr];
+          if (r) {
+            const well = `"${(r.went_well || '').replace(/"/g, '""')}"`;
+            const failed = `"${(r.failed_tasks || '').replace(/"/g, '""')}"`;
+            const why = `"${(r.why_missed || '').replace(/"/g, '""')}"`;
+            const improve = `"${(r.improve_tomorrow || '').replace(/"/g, '""')}"`;
+            csv += `${dateStr},${well},${failed},${why},${improve},${r.energy || '-'},${r.mood || '-'}\n`;
+          }
+        });
+      }
+
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Taskora_Export_${new Date().toISOString().split('T')[0]}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      this.showToast("Data exported to Excel (.csv) successfully!", "success");
+    } catch (err) {
+      this.showToast("Excel Export failed: " + err.message, "danger");
+    }
+  },
+
+  async exportToPDF() {
+    try {
+      const data = await API.exportData();
+      const user = this.currentUser || { name: "Taskora User", email: "" };
+      const tasks = data.tasks || [];
+      const habits = data.habits || [];
+      const dateStr = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+
+      const completedTasks = tasks.filter(t => t.status === 'completed' || t.completed).length;
+      const totalTasks = tasks.length;
+      const ratings = tasks.filter(t => t.quality_rating > 0).map(t => t.quality_rating);
+      const avgQuality = ratings.length ? (ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1) : "N/A";
+      const activeStreaks = habits.map(h => h.current_streak || 0);
+      const maxStreak = activeStreaks.length ? Math.max(...activeStreaks) : 0;
+
+      const printWindow = window.open("", "_blank", "width=900,height=800");
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Taskora Performance Report - ${user.name}</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 2.5rem; color: #1e293b; background: #ffffff; line-height: 1.5; }
+            .header { display: flex; align-items: center; justify-content: space-between; border-bottom: 3px solid #6366f1; padding-bottom: 1rem; margin-bottom: 2rem; }
+            .logo { font-size: 2rem; font-weight: 800; color: #6366f1; }
+            .user-info { text-align: right; font-size: 0.9rem; color: #64748b; }
+            .metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem; }
+            .metric-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 1rem; text-align: center; }
+            .metric-val { font-size: 1.6rem; font-weight: 800; color: #6366f1; }
+            .metric-lbl { font-size: 0.75rem; color: #64748b; font-weight: 700; text-transform: uppercase; margin-top: 0.25rem; }
+            h2 { font-size: 1.25rem; font-weight: 700; color: #0f172a; margin-top: 2rem; margin-bottom: 0.75rem; border-bottom: 2px solid #e2e8f0; padding-bottom: 0.4rem; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 1.5rem; font-size: 0.9rem; }
+            th, td { border: 1px solid #cbd5e1; padding: 0.65rem 0.8rem; text-align: left; }
+            th { background-color: #f1f5f9; font-weight: 700; color: #334155; }
+            .badge { display: inline-block; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 700; }
+            .completed { background: #dcfce7; color: #166534; }
+            .missed { background: #fee2e2; color: #991b1b; }
+            .in_progress { background: #e0e7ff; color: #3730a3; }
+            .no-print { margin-bottom: 1.5rem; padding: 1rem; background: #EEF2FF; border-radius: 8px; text-align: center; border: 1px solid #C7D2FE; }
+            .print-btn { background: #6366f1; color: white; border: none; padding: 0.75rem 1.75rem; font-size: 1rem; font-weight: 700; border-radius: 6px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+            @media print { .no-print { display: none; } }
+          </style>
+        </head>
+        <body>
+          <div class="no-print">
+            <button class="print-btn" onclick="window.print()">🖨️ Save as PDF / Print Report</button>
+          </div>
+
+          <div class="header">
+            <div>
+              <div class="logo">Taskora</div>
+              <div style="font-weight: 600; font-size: 1.1rem; color: #334155;">Daily Routine & Self-Improvement Report</div>
+            </div>
+            <div class="user-info">
+              <strong style="color: #0f172a; font-size: 1.05rem;">${user.name}</strong><br>
+              ${user.email}<br>
+              Date: ${dateStr}
+            </div>
+          </div>
+
+          <div class="metrics-grid">
+            <div class="metric-card">
+              <div class="metric-val">${completedTasks} / ${totalTasks}</div>
+              <div class="metric-lbl">Tasks Completed</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-val">⭐ ${avgQuality}</div>
+              <div class="metric-lbl">Avg Quality Rating</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-val">🔥 ${maxStreak} Days</div>
+              <div class="metric-lbl">Max Habit Streak</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-val">${totalTasks ? Math.round((completedTasks/totalTasks)*100) : 100}%</div>
+              <div class="metric-lbl">Completion Rate</div>
+            </div>
+          </div>
+
+          <h2>📋 Routine Tasks Breakdown</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Activity Title</th>
+                <th>Category</th>
+                <th>Time / Priority</th>
+                <th>Status</th>
+                <th>Quality Rating</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${tasks.length ? tasks.map(t => `
+                <tr>
+                  <td><strong>${t.title}</strong>${t.note ? `<br><small style="color:#64748b;">${t.note}</small>` : ''}</td>
+                  <td>${t.category || 'General'}</td>
+                  <td>${t.due_time || '09:00'} (${t.priority || 'medium'})</td>
+                  <td><span class="badge ${t.status || 'completed'}">${(t.status || 'completed').replace('_', ' ')}</span></td>
+                  <td>${t.quality_rating ? '⭐ '.repeat(t.quality_rating) : '-'}</td>
+                </tr>
+              `).join('') : '<tr><td colspan="5" style="text-align:center;">No routine tasks logged.</td></tr>'}
+            </tbody>
+          </table>
+
+          <h2>⚡ Habit Trackers Progress</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Habit Name</th>
+                <th>Category</th>
+                <th>Target</th>
+                <th>Current Streak</th>
+                <th>Status Today</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${habits.length ? habits.map(h => `
+                <tr>
+                  <td>${h.icon || '⚡'} <strong>${h.name}</strong></td>
+                  <td>${h.category || 'General'}</td>
+                  <td>${h.target_value || 1} ${h.unit || 'times'}</td>
+                  <td>🔥 ${h.current_streak || 0} days</td>
+                  <td>${h.completed_today ? '✓ Completed' : 'Pending'}</td>
+                </tr>
+              `).join('') : '<tr><td colspan="5" style="text-align:center;">No habit trackers configured.</td></tr>'}
+            </tbody>
+          </table>
+        </body>
+        </html>
+      `);
+      printWindow.document.close();
+      this.showToast("Opening PDF Report preview window...", "info");
+    } catch (err) {
+      this.showToast("PDF Export failed: " + err.message, "danger");
+    }
   },
 
   async deleteUserAccount() {
