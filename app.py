@@ -133,12 +133,25 @@ def login():
 def get_me(user):
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT u.id, u.name, u.email, u.avatar, u.bio, u.timezone, s.theme, s.accent_color, s.week_start, s.streak_freezes_count, s.leaderboard_visible FROM users u JOIN user_settings s ON u.id = s.user_id WHERE u.id = ?", (user["id"],))
+    cursor.execute("INSERT OR IGNORE INTO user_settings (user_id) VALUES (?)", (user["id"],))
+    conn.commit()
+    cursor.execute("""
+        SELECT u.id, u.name, u.email, u.avatar, u.bio, u.timezone,
+               COALESCE(s.theme, 'system') as theme,
+               COALESCE(s.accent_color, 'indigo') as accent_color,
+               COALESCE(s.week_start, 'monday') as week_start,
+               COALESCE(s.streak_freezes_count, 2) as streak_freezes_count,
+               COALESCE(s.leaderboard_visible, 1) as leaderboard_visible
+        FROM users u
+        LEFT JOIN user_settings s ON u.id = s.user_id
+        WHERE u.id = ?
+    """, (user["id"],))
     row = cursor.fetchone()
     conn.close()
     if not row:
         return jsonify({"error": "User not found"}), 404
     return jsonify({"user": dict(row)})
+
 
 @app.route("/api/auth/logout", methods=["POST"])
 def logout():

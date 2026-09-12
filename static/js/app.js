@@ -87,17 +87,30 @@ const App = {
         }
       });
     });
+    const logoutBtn = document.getElementById("logout-btn");
+    if (logoutBtn) {
+      logoutBtn.addEventListener("click", async () => {
+        await API.logout();
+        this.currentUser = null;
+        window.location.hash = "#login";
+        this.handleRoute();
+        this.showToast("Logged out successfully");
+      });
+    }
 
-    document.getElementById("logout-btn").addEventListener("click", async () => {
-      await API.logout();
-      this.currentUser = null;
-      window.location.hash = "#login";
-      this.showToast("Logged out successfully");
-    });
+    const userMenuBtn = document.getElementById("user-menu-btn");
+    if (userMenuBtn) {
+      userMenuBtn.addEventListener("click", () => {
+        window.location.hash = "#settings";
+      });
+    }
 
-    document.getElementById("test-alarm-btn").addEventListener("click", () => {
-      this.triggerWakeupAlarm();
-    });
+    const testAlarmBtn = document.getElementById("test-alarm-btn");
+    if (testAlarmBtn) {
+      testAlarmBtn.addEventListener("click", () => {
+        this.triggerWakeupAlarm();
+      });
+    }
   },
 
   async checkAuthStatus() {
@@ -109,6 +122,7 @@ const App = {
         this.updateUserUI();
       } catch (err) {
         this.currentUser = null;
+        API.setToken(null);
       }
     }
   },
@@ -226,6 +240,7 @@ const App = {
           this.currentUser = res.user;
           this.updateUserUI();
           window.location.hash = "#dashboard";
+          this.handleRoute();
           this.showToast("Welcome back, " + res.user.name + "!");
         } catch (err) {
           this.showToast(err.message, "danger");
@@ -260,6 +275,7 @@ const App = {
           this.currentUser = res.user;
           this.updateUserUI();
           window.location.hash = "#onboarding";
+          this.handleRoute();
         } catch (err) {
           this.showToast(err.message, "danger");
         }

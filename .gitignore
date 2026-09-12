@@ -41,3 +41,5 @@ TaskoraMobileLauncher*.class
 # OS / Environment
 .DS_Store
 Thumbs.db
+.gradle/
+
