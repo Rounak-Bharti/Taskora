@@ -9,11 +9,59 @@ const App = {
   currentChart: null,
 
   async init() {
+    this.initAlarmSettings();
     this.bindGlobalEvents();
     this.initTheme();
     await this.checkAuthStatus();
     window.addEventListener("hashchange", () => this.handleRoute());
     this.handleRoute();
+    this.startAlarmMonitor();
+  },
+
+  initAlarmSettings() {
+    const saved = localStorage.getItem("taskora_alarm_settings");
+    if (saved) {
+      try {
+        this.alarmSettings = JSON.parse(saved);
+      } catch (e) {
+        this.alarmSettings = this.getDefaultAlarmSettings();
+      }
+    } else {
+      this.alarmSettings = this.getDefaultAlarmSettings();
+    }
+  },
+
+  getDefaultAlarmSettings() {
+    return {
+      enabled: true,
+      time: "07:00",
+      sound: "digital_beep",
+      difficulty: "easy",
+      lastTriggeredDate: ""
+    };
+  },
+
+  saveAlarmSettings(settings) {
+    this.alarmSettings = { ...this.alarmSettings, ...settings };
+    localStorage.setItem("taskora_alarm_settings", JSON.stringify(this.alarmSettings));
+  },
+
+  startAlarmMonitor() {
+    if (this.alarmMonitorInterval) clearInterval(this.alarmMonitorInterval);
+    this.alarmMonitorInterval = setInterval(() => {
+      if (!this.alarmSettings || !this.alarmSettings.enabled) return;
+      const now = new Date();
+      const currentHours = String(now.getHours()).padStart(2, "0");
+      const currentMins = String(now.getMinutes()).padStart(2, "0");
+      const currentTimeStr = `${currentHours}:${currentMins}`;
+      const todayStr = now.toISOString().split("T")[0];
+
+      if (currentTimeStr === this.alarmSettings.time && this.alarmSettings.lastTriggeredDate !== todayStr) {
+        this.alarmSettings.lastTriggeredDate = todayStr;
+        this.saveAlarmSettings(this.alarmSettings);
+        this.triggerWakeupAlarm();
+      }
+    }, 10000);
   },
 
   initTheme() {
@@ -108,7 +156,7 @@ const App = {
     const testAlarmBtn = document.getElementById("test-alarm-btn");
     if (testAlarmBtn) {
       testAlarmBtn.addEventListener("click", () => {
-        this.triggerWakeupAlarm();
+        this.openAlarmSettingsModal();
       });
     }
   },
@@ -1023,6 +1071,21 @@ const App = {
         <button class="btn btn-primary" onclick="App.saveProfileSettings()">Save Profile</button>
       </div>
 
+      <div class="card" style="max-width: 600px; margin-bottom: 2rem;">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <div>
+            <h3 class="section-title" style="margin-bottom: 0.25rem;">⏰ Wake-up Math Alarm</h3>
+            <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 0;">
+              Alarm Time: <strong>${(this.alarmSettings && this.alarmSettings.time) || '07:00'}</strong> 
+              <span class="badge" style="margin-left: 0.5rem; background: ${(this.alarmSettings && this.alarmSettings.enabled) ? 'var(--success-light)' : 'var(--bg-surface-elevated)'}; color: ${(this.alarmSettings && this.alarmSettings.enabled) ? 'var(--success)' : 'var(--text-muted)'};">
+                ${(this.alarmSettings && this.alarmSettings.enabled) ? '✓ Active' : 'Off'}
+              </span>
+            </p>
+          </div>
+          <button class="btn btn-primary" onclick="App.openAlarmSettingsModal()">Configure Alarm</button>
+        </div>
+      </div>
+
       <div class="card" style="max-width: 600px;">
         <h3 class="section-title" style="color: var(--danger);">Data Export & Danger Zone</h3>
         <div style="display: flex; gap: 1rem;">
@@ -1232,14 +1295,117 @@ const App = {
     }
   },
 
+  openAlarmSettingsModal() {
+    const s = this.alarmSettings || this.getDefaultAlarmSettings();
+    this.showModal(`
+      <div class="modal-header">
+        <h2 class="modal-title">⏰ Wake-up Math Alarm Settings</h2>
+        <span class="close-btn" onclick="App.closeModal()">×</span>
+      </div>
+      <form id="alarm-settings-form">
+        <div class="form-group">
+          <label>Alarm Time</label>
+          <input type="time" id="alarm-time-input" value="${s.time}" required style="font-size: 1.25rem; font-weight: 700; text-align: center;">
+        </div>
+
+        <div class="form-group">
+          <label style="display: flex; align-items: center; gap: 0.6rem; cursor: pointer; margin-top: 0.5rem; background: var(--bg-surface-elevated); padding: 0.75rem; border-radius: var(--radius-md);">
+            <input type="checkbox" id="alarm-enabled-input" ${s.enabled ? 'checked' : ''} style="width: 20px; height: 20px; cursor: pointer;">
+            <span style="font-weight: 700; font-size: 0.95rem;">Enable Daily Scheduled Wake-up Alarm</span>
+          </label>
+        </div>
+
+        <div class="form-row" style="margin-top: 1rem;">
+          <div class="form-group">
+            <label>Alarm Sound Tone</label>
+            <select id="alarm-sound-input">
+              <option value="digital_beep" ${s.sound === 'digital_beep' ? 'selected' : ''}>🔔 Digital Beep (Classic)</option>
+              <option value="siren" ${s.sound === 'siren' ? 'selected' : ''}>🚨 Emergency Radar Siren</option>
+              <option value="gentle_chime" ${s.sound === 'gentle_chime' ? 'selected' : ''}>🎼 Gentle Harmonic Chime</option>
+              <option value="classic_bell" ${s.sound === 'classic_bell' ? 'selected' : ''}>🔔 Metallic Ringing Bell</option>
+              <option value="energetic_pulse" ${s.sound === 'energetic_pulse' ? 'selected' : ''}>⚡ Energetic Electronic Pulse</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>Math Challenge Level</label>
+            <select id="alarm-difficulty-input">
+              <option value="easy" ${s.difficulty === 'easy' ? 'selected' : ''}>Easy (Addition)</option>
+              <option value="medium" ${s.difficulty === 'medium' ? 'selected' : ''}>Medium (Double Digit)</option>
+              <option value="hard" ${s.difficulty === 'hard' ? 'selected' : ''}>Hard (Multiplication)</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 0.75rem; margin-top: 1.5rem;">
+          <button type="button" id="preview-sound-btn" class="btn btn-secondary" style="flex: 1;">🔊 Preview Sound</button>
+          <button type="button" id="test-full-alarm-btn" class="btn btn-secondary" style="flex: 1;">⏰ Test Alarm Overlay</button>
+        </div>
+
+        <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">💾 Save Alarm Settings</button>
+      </form>
+    `);
+
+    document.getElementById("preview-sound-btn").onclick = () => {
+      const selectedSound = document.getElementById("alarm-sound-input").value;
+      const originalSound = (this.alarmSettings && this.alarmSettings.sound) || "digital_beep";
+      this.alarmSettings = { ...this.alarmSettings, sound: selectedSound };
+      this.playAlarmTone();
+      this.alarmSettings.sound = originalSound;
+      this.showToast("Playing sound preview: " + selectedSound, "info");
+    };
+
+    document.getElementById("test-full-alarm-btn").onclick = () => {
+      this.closeModal();
+      this.triggerWakeupAlarm();
+    };
+
+    document.getElementById("alarm-settings-form").onsubmit = (e) => {
+      e.preventDefault();
+      const timeVal = document.getElementById("alarm-time-input").value;
+      const enabledVal = document.getElementById("alarm-enabled-input").checked;
+      const soundVal = document.getElementById("alarm-sound-input").value;
+      const diffVal = document.getElementById("alarm-difficulty-input").value;
+
+      this.saveAlarmSettings({
+        time: timeVal,
+        enabled: enabledVal,
+        sound: soundVal,
+        difficulty: diffVal
+      });
+
+      this.closeModal();
+      if (window.location.hash === "#settings") this.handleRoute();
+      this.showToast(`Alarm set for ${timeVal} (${enabledVal ? 'Active' : 'Disabled'})`, "success");
+    };
+  },
+
   triggerWakeupAlarm() {
     const overlay = document.getElementById("alarm-overlay");
     const inputEl = document.getElementById("math-answer");
-    const num1 = Math.floor(Math.random() * 30) + 10;
-    const num2 = Math.floor(Math.random() * 30) + 10;
-    const expected = num1 + num2;
+    const diff = (this.alarmSettings && this.alarmSettings.difficulty) || "easy";
 
-    document.getElementById("math-problem").textContent = `${num1} + ${num2} = ?`;
+    let problemText = "";
+    let expected = 0;
+
+    if (diff === "hard") {
+      const num1 = Math.floor(Math.random() * 12) + 5;
+      const num2 = Math.floor(Math.random() * 9) + 4;
+      expected = num1 * num2;
+      problemText = `${num1} × ${num2} = ?`;
+    } else if (diff === "medium") {
+      const num1 = Math.floor(Math.random() * 50) + 20;
+      const num2 = Math.floor(Math.random() * 50) + 15;
+      expected = num1 + num2;
+      problemText = `${num1} + ${num2} = ?`;
+    } else {
+      const num1 = Math.floor(Math.random() * 20) + 10;
+      const num2 = Math.floor(Math.random() * 20) + 5;
+      expected = num1 + num2;
+      problemText = `${num1} + ${num2} = ?`;
+    }
+
+    document.getElementById("math-problem").textContent = problemText;
     inputEl.value = "";
     overlay.classList.add("active");
     overlay.style.display = "flex";
@@ -1277,17 +1443,76 @@ const App = {
 
   playAlarmTone() {
     try {
+      const soundPreset = (this.alarmSettings && this.alarmSettings.sound) || "digital_beep";
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(880, ctx.currentTime);
-      gain.gain.setValueAtTime(0.2, ctx.currentTime);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.3);
-    } catch (e) {}
+      const now = ctx.currentTime;
+
+      if (soundPreset === "digital_beep") {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "square";
+        osc.frequency.setValueAtTime(880, now);
+        osc.frequency.setValueAtTime(1046, now + 0.15);
+        gain.gain.setValueAtTime(0.15, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.35);
+      } else if (soundPreset === "siren") {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(600, now);
+        osc.frequency.linearRampToValueAtTime(1200, now + 0.25);
+        osc.frequency.linearRampToValueAtTime(600, now + 0.5);
+        gain.gain.setValueAtTime(0.2, now);
+        gain.gain.linearRampToValueAtTime(0.01, now + 0.5);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.5);
+      } else if (soundPreset === "gentle_chime") {
+        [523.25, 659.25, 783.99, 1046.50].forEach((freq, idx) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(freq, now + idx * 0.1);
+          gain.gain.setValueAtTime(0.15, now + idx * 0.1);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.1 + 0.4);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + idx * 0.1);
+          osc.stop(now + idx * 0.1 + 0.45);
+        });
+      } else if (soundPreset === "classic_bell") {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(1200, now);
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.6);
+      } else if (soundPreset === "energetic_pulse") {
+        for (let i = 0; i < 3; i++) {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "square";
+          osc.frequency.setValueAtTime(1500, now + i * 0.12);
+          gain.gain.setValueAtTime(0.15, now + i * 0.12);
+          gain.gain.exponentialRampToValueAtTime(0.01, now + i * 0.12 + 0.08);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + i * 0.12);
+          osc.stop(now + i * 0.12 + 0.09);
+        }
+      }
+    } catch (e) {
+      console.warn("Audio Context playback error:", e);
+    }
   },
 
   showToast(message, type = "info") {
