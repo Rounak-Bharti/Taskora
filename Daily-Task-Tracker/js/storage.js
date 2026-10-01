@@ -291,12 +291,8 @@ const Storage = {
 
             if (docSnap.exists) {
                 const data = docSnap.data();
-                if (data.tasks) {
-                    localStorage.setItem(this.getKey(STORAGE_KEYS.TASKS), JSON.stringify(data.tasks));
-                }
-                if (data.records) {
-                    localStorage.setItem(this.getKey(STORAGE_KEYS.RECORDS), JSON.stringify(data.records));
-                }
+                localStorage.setItem(this.getKey(STORAGE_KEYS.TASKS), JSON.stringify(data.tasks || []));
+                localStorage.setItem(this.getKey(STORAGE_KEYS.RECORDS), JSON.stringify(data.records || []));
                 if (data.categories) {
                     localStorage.setItem(this.getKey(STORAGE_KEYS.CATEGORIES), JSON.stringify(data.categories));
                 }
@@ -307,6 +303,8 @@ const Storage = {
                 return true;
             } else {
                 console.log('New user detected in Firestore. Initializing clean Cloud document.');
+                localStorage.setItem(this.getKey(STORAGE_KEYS.TASKS), JSON.stringify([]));
+                localStorage.setItem(this.getKey(STORAGE_KEYS.RECORDS), JSON.stringify([]));
                 await this.syncUserDataToFirestore();
                 return true;
             }

@@ -307,26 +307,53 @@ const App = {
             this.showToast('Creating account...', 'info');
             const cred = await auth.createUserWithEmailAndPassword(email, password);
             
-            if (name && cred.user) {
-                await cred.user.updateProfile({ displayName: name });
-            }
-
-            // Sync initial user data to Firestore
             if (cred.user) {
-                Storage.setCurrentUserId(cred.user.uid);
+                const uid = cred.user.uid;
+
+                // 1. Update Auth Display Name if provided
+                if (name) {
+                    try {
+                        await cred.user.updateProfile({ displayName: name });
+                    } catch (pErr) {
+                        console.warn('Profile name update warning:', pErr);
+                    }
+                }
+
+                // 2. Create Root User Profile Document under users/{uid} in Firestore
+                if (typeof db !== 'undefined' && db) {
+                    try {
+                        await db.collection('users').doc(uid).set({
+                            uid: uid,
+                            email: email,
+                            displayName: name || email.split('@')[0],
+                            createdAt: (typeof firebase !== 'undefined' && firebase.firestore) ? firebase.firestore.FieldValue.serverTimestamp() : new Date().toISOString()
+                        }, { merge: true });
+                    } catch (fsErr) {
+                        console.warn('Firestore user doc creation warning:', fsErr);
+                    }
+                }
+
+                // 3. Initialize user-scoped storage & save initial settings
+                Storage.setCurrentUserId(uid);
+                const userName = name || email.split('@')[0];
+                Storage.saveSettings({ userName }, false);
+
+                // 4. Initialize clean user document in Cloud Firestore
                 await Storage.syncUserDataToFirestore();
             }
 
             this.showToast('✓ Account created successfully!', 'success');
         } catch (err) {
             console.error('Signup error:', err);
-            let msg = 'Failed to create account.';
+            let msg = 'Failed to create account: ' + (err.message || 'Unknown error');
             if (err.code === 'auth/email-already-in-use') {
                 msg = 'An account with this email already exists. Try logging in.';
             } else if (err.code === 'auth/invalid-email') {
                 msg = 'Invalid email address format.';
             } else if (err.code === 'auth/weak-password') {
-                msg = 'Password is too weak.';
+                msg = 'Password is too weak. Must be at least 6 characters.';
+            } else if (err.code === 'auth/api-key-not-valid' || err.code === 'auth/invalid-api-key') {
+                msg = 'Invalid Firebase API Key. Please update your Firebase config in Settings or firebase-config.js.';
             }
             this.showToast(msg, 'error');
         }
