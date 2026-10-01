@@ -587,9 +587,36 @@ const App = {
     },
 
     /**
+     * Toggle Mobile Navigation Dropdown Menu
+     */
+    toggleMobileMenu(forceClose = false) {
+        const wrapper = document.getElementById('header-nav-wrapper');
+        const toggleBtn = document.getElementById('btn-mobile-menu-toggle');
+        const hamburgerIcon = toggleBtn?.querySelector('.icon-hamburger');
+        const closeIcon = toggleBtn?.querySelector('.icon-close');
+
+        if (!wrapper) return;
+
+        const isCurrentlyOpen = wrapper.classList.contains('mobile-open');
+
+        if (forceClose || isCurrentlyOpen) {
+            wrapper.classList.remove('mobile-open');
+            if (hamburgerIcon) hamburgerIcon.style.display = 'block';
+            if (closeIcon) closeIcon.style.display = 'none';
+        } else {
+            wrapper.classList.add('mobile-open');
+            if (hamburgerIcon) hamburgerIcon.style.display = 'none';
+            if (closeIcon) closeIcon.style.display = 'block';
+        }
+    },
+
+    /**
      * View Switcher Navigation
      */
     switchView(viewName) {
+        // Close mobile menu if open
+        this.toggleMobileMenu(true);
+
         // Enforce Auth view if user is not logged in
         if (this.useMockAuth && typeof MockAuth !== 'undefined') {
             const currentUser = MockAuth.getCurrentUser();
@@ -632,6 +659,20 @@ const App = {
      * Bind all global event listeners
      */
     bindEvents() {
+        // Mobile Menu Toggle
+        document.getElementById('btn-mobile-menu-toggle')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.toggleMobileMenu();
+        });
+
+        // Close Mobile Menu on Outside Click
+        document.addEventListener('click', (e) => {
+            const header = document.querySelector('.app-header');
+            if (header && !header.contains(e.target)) {
+                this.toggleMobileMenu(true);
+            }
+        });
+
         // Navigation links
         document.querySelectorAll('.nav-link').forEach(link => {
             link.addEventListener('click', (e) => {
