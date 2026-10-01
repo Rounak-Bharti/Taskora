@@ -28,29 +28,26 @@ const App = {
         // 1. Detect local date YYYY-MM-DD
         this.todayDateStr = this.getTodayDate();
 
-        // 2. Check & seed sample data if empty
-        Storage.seedSampleData(false);
-
-        // 3. Initialize History module state
+        // 2. Initialize History module state
         HistoryManager.init(this.todayDateStr);
 
-        // 4. Load & apply theme settings
+        // 3. Load & apply theme settings
         this.loadSettings();
 
-        // 5. Update header info (Date, Greeting)
+        // 4. Update header info (Date, Greeting)
         this.updateHeaderInfo();
 
-        // 6. Populate Category Dropdowns
+        // 5. Populate Category Dropdowns
         this.populateCategoryDropdowns();
 
-        // 7. Bind all UI event listeners
+        // 6. Bind all UI event listeners
         this.bindEvents();
 
-        // 8. Start Background Reminder Checker (Section 16)
+        // 7. Start Background Reminder Checker (Section 16)
         this.startReminderChecker();
 
-        // 9. Initial View render
-        this.switchView('dashboard');
+        // 8. Initialize Authentication State Listener & View
+        this.initAuth();
     },
 
     /**
@@ -186,6 +183,207 @@ const App = {
     },
 
     // ==========================================
+    // AUTHENTICATION & SESSION MANAGEMENT
+    // ==========================================
+
+    /**
+     * Firebase Auth State Listener & Initialization
+     */
+    initAuth() {
+        if (typeof auth === 'undefined' || !auth) {
+            console.warn('Firebase Auth not available. Running in local fallback mode.');
+            Storage.seedSampleData(false);
+            this.switchView('dashboard');
+            return;
+        }
+
+        auth.onAuthStateChanged(async (user) => {
+            const emailBadge = document.getElementById('header-user-email');
+            const logoutBtn = document.getElementById('btn-header-logout');
+            const navContainer = document.querySelector('.nav-links');
+
+            if (user) {
+                // User logged in
+                Storage.setCurrentUserId(user.uid);
+                
+                // Fetch & restore user data from Cloud Firestore
+                await Storage.loadUserDataFromFirestore(user.uid);
+
+                if (emailBadge) {
+                    emailBadge.textContent = user.email;
+                    emailBadge.style.display = 'inline-block';
+                }
+                if (logoutBtn) logoutBtn.style.display = 'inline-flex';
+                if (navContainer) navContainer.style.display = 'flex';
+
+                const displayName = user.displayName || (user.email ? user.email.split('@')[0] : 'User');
+                this.updateHeaderInfo(displayName);
+                this.populateCategoryDropdowns();
+                this.switchView('dashboard');
+            } else {
+                // User logged out / not authenticated
+                Storage.clearCurrentUserData();
+
+                if (emailBadge) emailBadge.style.display = 'none';
+                if (logoutBtn) logoutBtn.style.display = 'none';
+                if (navContainer) navContainer.style.display = 'none';
+
+                this.updateHeaderInfo('Guest');
+                this.switchView('auth');
+            }
+        });
+    },
+
+    /**
+     * Handle Login Form Submission
+     */
+    async handleLoginSubmit() {
+        const emailInput = document.getElementById('login-email');
+        const passwordInput = document.getElementById('login-password');
+        const email = emailInput?.value.trim();
+        const password = passwordInput?.value;
+
+        if (!email || !password) {
+            this.showToast('Please enter your email and password.', 'warning');
+            return;
+        }
+
+        if (typeof auth === 'undefined' || !auth) {
+            this.showToast('Firebase Auth unavailable. Check your connection.', 'error');
+            return;
+        }
+
+        try {
+            this.showToast('Logging in...', 'info');
+            await auth.signInWithEmailAndPassword(email, password);
+            this.showToast('✓ Login successful!', 'success');
+        } catch (err) {
+            console.error('Login error:', err);
+            let msg = 'Failed to log in. Please check your credentials.';
+            if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+                msg = 'Invalid email or password.';
+            } else if (err.code === 'auth/invalid-email') {
+                msg = 'Invalid email address format.';
+            }
+            this.showToast(msg, 'error');
+        }
+    },
+
+    /**
+     * Handle Signup Form Submission
+     */
+    async handleSignupSubmit() {
+        const nameInput = document.getElementById('signup-name');
+        const emailInput = document.getElementById('signup-email');
+        const passInput = document.getElementById('signup-password');
+        const confirmInput = document.getElementById('signup-confirm-password');
+
+        const name = nameInput?.value.trim();
+        const email = emailInput?.value.trim();
+        const password = passInput?.value;
+        const confirmPassword = confirmInput?.value;
+
+        if (!email || !password || !confirmPassword) {
+            this.showToast('Please fill out all required fields.', 'warning');
+            return;
+        }
+
+        if (password !== confirmPassword) {
+            this.showToast('Passwords do not match. Please re-enter.', 'warning');
+            return;
+        }
+
+        if (password.length < 6) {
+            this.showToast('Password must be at least 6 characters long.', 'warning');
+            return;
+        }
+
+        if (typeof auth === 'undefined' || !auth) {
+            this.showToast('Firebase Auth unavailable.', 'error');
+            return;
+        }
+
+        try {
+            this.showToast('Creating account...', 'info');
+            const cred = await auth.createUserWithEmailAndPassword(email, password);
+            
+            if (name && cred.user) {
+                await cred.user.updateProfile({ displayName: name });
+            }
+
+            // Sync initial user data to Firestore
+            if (cred.user) {
+                Storage.setCurrentUserId(cred.user.uid);
+                await Storage.syncUserDataToFirestore();
+            }
+
+            this.showToast('✓ Account created successfully!', 'success');
+        } catch (err) {
+            console.error('Signup error:', err);
+            let msg = 'Failed to create account.';
+            if (err.code === 'auth/email-already-in-use') {
+                msg = 'An account with this email already exists. Try logging in.';
+            } else if (err.code === 'auth/invalid-email') {
+                msg = 'Invalid email address format.';
+            } else if (err.code === 'auth/weak-password') {
+                msg = 'Password is too weak.';
+            }
+            this.showToast(msg, 'error');
+        }
+    },
+
+    /**
+     * Handle Forgot Password Form Submission
+     */
+    async handleForgotSubmit() {
+        const emailInput = document.getElementById('reset-email');
+        const email = emailInput?.value.trim();
+
+        if (!email) {
+            this.showToast('Please enter your account email address.', 'warning');
+            return;
+        }
+
+        if (typeof auth === 'undefined' || !auth) {
+            this.showToast('Firebase Auth unavailable.', 'error');
+            return;
+        }
+
+        try {
+            await auth.sendPasswordResetEmail(email);
+            this.showToast('✓ Password reset link sent to your email!', 'success');
+            
+            // Return to login card
+            document.getElementById('auth-card-forgot').style.display = 'none';
+            document.getElementById('auth-card-login').style.display = 'block';
+        } catch (err) {
+            console.error('Reset password error:', err);
+            let msg = 'Failed to send reset link.';
+            if (err.code === 'auth/user-not-found') {
+                msg = 'No account found with this email.';
+            }
+            this.showToast(msg, 'error');
+        }
+    },
+
+    /**
+     * Handle User Logout
+     */
+    async handleLogout() {
+        if (typeof auth === 'undefined' || !auth) return;
+
+        try {
+            await auth.signOut();
+            Storage.clearCurrentUserData();
+            this.showToast('Logged out successfully.', 'info');
+            this.switchView('auth');
+        } catch (err) {
+            console.error('Logout error:', err);
+            this.showToast('Error signing out.', 'error');
+        }
+    },
+
+    // ==========================================
     // REMINDER SYSTEM & NOTIFICATIONS (SECTION 13, 14, 16, 17)
     // ==========================================
 
@@ -283,6 +481,11 @@ const App = {
      * View Switcher Navigation
      */
     switchView(viewName) {
+        // If Firebase Auth is available and user is not authenticated, force Auth view
+        if (typeof auth !== 'undefined' && auth && !auth.currentUser && viewName !== 'auth') {
+            viewName = 'auth';
+        }
+
         this.currentView = viewName;
 
         document.querySelectorAll('.nav-link').forEach(link => {
@@ -322,6 +525,52 @@ const App = {
                 const view = link.getAttribute('data-view');
                 if (view) this.switchView(view);
             });
+        });
+
+        // Header Logout Button
+        document.getElementById('btn-header-logout')?.addEventListener('click', () => {
+            this.handleLogout();
+        });
+
+        // Auth Card View Toggles
+        document.getElementById('btn-show-signup')?.addEventListener('click', () => {
+            document.getElementById('auth-card-login').style.display = 'none';
+            document.getElementById('auth-card-forgot').style.display = 'none';
+            document.getElementById('auth-card-signup').style.display = 'block';
+        });
+
+        document.getElementById('btn-show-login')?.addEventListener('click', () => {
+            document.getElementById('auth-card-signup').style.display = 'none';
+            document.getElementById('auth-card-forgot').style.display = 'none';
+            document.getElementById('auth-card-login').style.display = 'block';
+        });
+
+        document.getElementById('btn-forgot-back-login')?.addEventListener('click', () => {
+            document.getElementById('auth-card-signup').style.display = 'none';
+            document.getElementById('auth-card-forgot').style.display = 'none';
+            document.getElementById('auth-card-login').style.display = 'block';
+        });
+
+        document.getElementById('btn-show-forgot')?.addEventListener('click', () => {
+            document.getElementById('auth-card-login').style.display = 'none';
+            document.getElementById('auth-card-signup').style.display = 'none';
+            document.getElementById('auth-card-forgot').style.display = 'block';
+        });
+
+        // Auth Form Submits
+        document.getElementById('form-login')?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.handleLoginSubmit();
+        });
+
+        document.getElementById('form-signup')?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.handleSignupSubmit();
+        });
+
+        document.getElementById('form-forgot-password')?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.handleForgotSubmit();
         });
 
         // Theme Toggle

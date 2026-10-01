@@ -1,12 +1,9 @@
 /**
- * Storage Module - Manages LocalStorage operations for Daily Task Tracker
+ * Storage Module - Manages LocalStorage & Cloud Firestore Operations for Taskora
  * 
- * Keys:
- * - dailyTaskTracker_tasks: Permanent task objects (with schedule & reminder)
- * - dailyTaskTracker_dailyRecords: Daily tracking records (status & notes per date)
- * - dailyTaskTracker_settings: User preferences & theme settings
- * - dailyTaskTracker_categories: Custom categories list
- * - dailyTaskTracker_triggeredReminders: Log of triggered reminder keys
+ * Supports user-specific data isolation:
+ * - LocalStorage caching per userId
+ * - Cloud Firestore remote sync under `users/{uid}`
  */
 
 const STORAGE_KEYS = {
@@ -29,75 +26,81 @@ const DEFAULT_CATEGORIES = [
 ];
 
 const Storage = {
+    currentUserId: null,
+    isSyncing: false,
+
     /**
-     * Get all permanent tasks from LocalStorage with defaults for schedule & reminder
-     * @returns {Array} Array of task objects
+     * Set active user ID for storage scoping
+     */
+    setCurrentUserId(uid) {
+        this.currentUserId = uid || null;
+    },
+
+    /**
+     * Get user-scoped storage key
+     */
+    getKey(baseKey) {
+        if (this.currentUserId) {
+            return `${baseKey}_${this.currentUserId}`;
+        }
+        return `${baseKey}_guest`;
+    },
+
+    /**
+     * Get all permanent tasks from LocalStorage
      */
     getTasks() {
         try {
-            const data = localStorage.getItem(STORAGE_KEYS.TASKS);
+            const data = localStorage.getItem(this.getKey(STORAGE_KEYS.TASKS));
             if (!data) return [];
 
             const tasks = JSON.parse(data);
             let updated = false;
 
             tasks.forEach(t => {
-                if (!t.category) {
-                    t.category = 'General';
-                    updated = true;
-                }
-                if (!t.priority) {
-                    t.priority = 'medium';
-                    updated = true;
-                }
+                if (!t.category) { t.category = 'General'; updated = true; }
+                if (!t.priority) { t.priority = 'medium'; updated = true; }
                 if (!t.schedule) {
-                    t.schedule = {
-                        type: 'daily',
-                        days: [],
-                        startDate: t.createdAt,
-                        endDate: null
-                    };
+                    t.schedule = { type: 'daily', days: [], startDate: t.createdAt, endDate: null };
                     updated = true;
                 }
                 if (!t.reminder) {
-                    t.reminder = {
-                        enabled: false,
-                        time: '18:00'
-                    };
+                    t.reminder = { enabled: false, time: '18:00' };
                     updated = true;
                 }
             });
 
             if (updated) {
-                this.saveTasks(tasks);
+                this.saveTasks(tasks, false);
             }
 
             return tasks;
         } catch (error) {
-            console.error('Error reading tasks from LocalStorage:', error);
+            console.error('Error reading tasks:', error);
             return [];
         }
     },
 
     /**
-     * Save permanent tasks to LocalStorage
-     * @param {Array} tasks Array of task objects
+     * Save permanent tasks to LocalStorage and Cloud Firestore
      */
-    saveTasks(tasks) {
+    saveTasks(tasks, syncRemote = true) {
         try {
-            localStorage.setItem(STORAGE_KEYS.TASKS, JSON.stringify(tasks));
+            localStorage.setItem(this.getKey(STORAGE_KEYS.TASKS), JSON.stringify(tasks));
+            if (syncRemote && this.currentUserId) {
+                this.syncUserDataToFirestore();
+            }
         } catch (error) {
-            console.error('Error saving tasks to LocalStorage:', error);
+            console.error('Error saving tasks:', error);
         }
     },
 
     /**
-     * Get categories list (Predefined + Custom)
-     * @returns {Array} Array of category name strings
+     * Get categories list
      */
     getCategories() {
         try {
-            const data = localStorage.getItem(STORAGE_KEYS.CATEGORIES);
+            const data = localStorage.getItem(this.getKey(STORAGE_KEYS.CATEGORIES));
             const customCategories = data ? JSON.parse(data) : [];
             
             const combined = [...DEFAULT_CATEGORIES];
@@ -108,7 +111,7 @@ const Storage = {
             });
             return combined;
         } catch (error) {
-            console.error('Error reading categories from LocalStorage:', error);
+            console.error('Error reading categories:', error);
             return [...DEFAULT_CATEGORIES];
         }
     },
@@ -129,100 +132,83 @@ const Storage = {
         }
 
         try {
-            const data = localStorage.getItem(STORAGE_KEYS.CATEGORIES);
+            const data = localStorage.getItem(this.getKey(STORAGE_KEYS.CATEGORIES));
             const customCategories = data ? JSON.parse(data) : [];
             customCategories.push(name);
-            localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(customCategories));
+            localStorage.setItem(this.getKey(STORAGE_KEYS.CATEGORIES), JSON.stringify(customCategories));
+            
+            if (this.currentUserId) {
+                this.syncUserDataToFirestore();
+            }
         } catch (error) {
-            console.error('Error saving category to LocalStorage:', error);
+            console.error('Error saving category:', error);
         }
 
         return this.getCategories();
     },
 
     /**
-     * Get all daily records from LocalStorage
+     * Get all daily records
      */
     getDailyRecords() {
         try {
-            const data = localStorage.getItem(STORAGE_KEYS.RECORDS);
+            const data = localStorage.getItem(this.getKey(STORAGE_KEYS.RECORDS));
             return data ? JSON.parse(data) : [];
         } catch (error) {
-            console.error('Error reading daily records from LocalStorage:', error);
+            console.error('Error reading daily records:', error);
             return [];
         }
     },
 
     /**
-     * Save daily records to LocalStorage
+     * Save daily records to LocalStorage & Firestore
      */
-    saveDailyRecords(records) {
+    saveDailyRecords(records, syncRemote = true) {
         try {
-            localStorage.setItem(STORAGE_KEYS.RECORDS, JSON.stringify(records));
+            localStorage.setItem(this.getKey(STORAGE_KEYS.RECORDS), JSON.stringify(records));
+            if (syncRemote && this.currentUserId) {
+                this.syncUserDataToFirestore();
+            }
         } catch (error) {
-            console.error('Error saving daily records to LocalStorage:', error);
+            console.error('Error saving daily records:', error);
         }
     },
 
     /**
-     * Triggered reminders log helpers (Duplicate Protection - Section 17)
-     */
-    getTriggeredReminders() {
-        try {
-            const data = localStorage.getItem(STORAGE_KEYS.TRIGGERED_REMINDERS);
-            return data ? JSON.parse(data) : [];
-        } catch (error) {
-            return [];
-        }
-    },
-
-    hasReminderBeenTriggered(key) {
-        const list = this.getTriggeredReminders();
-        return list.includes(key);
-    },
-
-    markReminderTriggered(key) {
-        const list = this.getTriggeredReminders();
-        if (!list.includes(key)) {
-            list.push(key);
-            try {
-                localStorage.setItem(STORAGE_KEYS.TRIGGERED_REMINDERS, JSON.stringify(list));
-            } catch (e) {}
-        }
-    },
-
-    /**
-     * Get user settings (e.g., theme, userName)
+     * Get settings
      */
     getSettings() {
         try {
-            const data = localStorage.getItem(STORAGE_KEYS.SETTINGS);
+            const data = localStorage.getItem(this.getKey(STORAGE_KEYS.SETTINGS));
             const defaultSettings = {
                 theme: 'light',
-                userName: 'Rounak'
+                userName: 'User'
             };
             return data ? { ...defaultSettings, ...JSON.parse(data) } : defaultSettings;
         } catch (error) {
-            console.error('Error reading settings from LocalStorage:', error);
-            return { theme: 'light', userName: 'Rounak' };
+            console.error('Error reading settings:', error);
+            return { theme: 'light', userName: 'User' };
         }
     },
 
     /**
-     * Save user settings to LocalStorage
+     * Save settings
      */
-    saveSettings(settings) {
+    saveSettings(settings, syncRemote = true) {
         try {
             const current = this.getSettings();
             const updated = { ...current, ...settings };
-            localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(updated));
+            localStorage.setItem(this.getKey(STORAGE_KEYS.SETTINGS), JSON.stringify(updated));
+            if (syncRemote && this.currentUserId) {
+                this.syncUserDataToFirestore();
+            }
         } catch (error) {
-            console.error('Error saving settings to LocalStorage:', error);
+            console.error('Error saving settings:', error);
         }
     },
 
     /**
-     * Helper to get a specific daily record for a task and date
+     * Helper to get a specific daily record
      */
     getRecord(taskId, dateStr) {
         const records = this.getDailyRecords();
@@ -257,192 +243,115 @@ const Storage = {
     },
 
     /**
-     * Seed initial sample data for demonstration if LocalStorage is empty
+     * Check if a reminder key has been triggered
      */
-    seedSampleData(force = false) {
-        const existingTasks = this.getTasks();
-        if (existingTasks.length > 0 && !force) {
+    hasReminderBeenTriggered(triggerKey) {
+        try {
+            const data = localStorage.getItem(this.getKey(STORAGE_KEYS.TRIGGERED_REMINDERS));
+            const keys = data ? JSON.parse(data) : [];
+            return keys.includes(triggerKey);
+        } catch (e) {
+            return false;
+        }
+    },
+
+    /**
+     * Mark a reminder key as triggered
+     */
+    markReminderTriggered(triggerKey) {
+        try {
+            const data = localStorage.getItem(this.getKey(STORAGE_KEYS.TRIGGERED_REMINDERS));
+            const keys = data ? JSON.parse(data) : [];
+            if (!keys.includes(triggerKey)) {
+                keys.push(triggerKey);
+                localStorage.setItem(this.getKey(STORAGE_KEYS.TRIGGERED_REMINDERS), JSON.stringify(keys));
+            }
+        } catch (e) {
+            console.error('Error marking reminder triggered:', e);
+        }
+    },
+
+    // ==========================================
+    // CLOUD FIRESTORE SYNC & PERSISTENCE
+    // ==========================================
+
+    /**
+     * Load user data from Cloud Firestore upon login
+     */
+    async loadUserDataFromFirestore(uid) {
+        this.setCurrentUserId(uid);
+        if (typeof db === 'undefined' || !db) {
+            console.warn('Firestore not initialized, relying on local storage cache');
             return false;
         }
 
-        const now = new Date();
-        
-        const formatDateKey = (d) => {
-            const yyyy = d.getFullYear();
-            const mm = String(d.getMonth() + 1).padStart(2, '0');
-            const dd = String(d.getDate()).padStart(2, '0');
-            return `${yyyy}-${mm}-${dd}`;
-        };
+        try {
+            const userDocRef = db.collection('users').doc(uid).collection('userData').doc('main');
+            const docSnap = await userDocRef.get();
 
-        const todayStr = formatDateKey(now);
-        
-        const yesterday = new Date(now);
-        yesterday.setDate(yesterday.getDate() - 1);
-        const yesterdayStr = formatDateKey(yesterday);
-
-        const sampleTasks = [
-            {
-                id: 'task_sample_1',
-                title: 'Study Java',
-                description: 'Practice core Java concepts, OOP, and data structures for 1 hour',
-                category: 'Study',
-                priority: 'high',
-                createdAt: yesterdayStr,
-                active: true,
-                schedule: {
-                    type: 'daily',
-                    days: [],
-                    startDate: yesterdayStr,
-                    endDate: null
-                },
-                reminder: {
-                    enabled: true,
-                    time: '18:00'
+            if (docSnap.exists) {
+                const data = docSnap.data();
+                if (data.tasks) {
+                    localStorage.setItem(this.getKey(STORAGE_KEYS.TASKS), JSON.stringify(data.tasks));
                 }
-            },
-            {
-                id: 'task_sample_2',
-                title: 'Workout',
-                description: '30-minute cardio and strength training routine',
-                category: 'Fitness',
-                priority: 'medium',
-                createdAt: yesterdayStr,
-                active: true,
-                schedule: {
-                    type: 'weekly',
-                    days: ['Mon', 'Wed', 'Fri'],
-                    startDate: yesterdayStr,
-                    endDate: null
-                },
-                reminder: {
-                    enabled: true,
-                    time: '07:00'
+                if (data.records) {
+                    localStorage.setItem(this.getKey(STORAGE_KEYS.RECORDS), JSON.stringify(data.records));
                 }
-            },
-            {
-                id: 'task_sample_3',
-                title: 'Read Book',
-                description: 'Read 20 pages of Atomic Habits',
-                category: 'Personal',
-                priority: 'low',
-                createdAt: yesterdayStr,
-                active: true,
-                schedule: {
-                    type: 'daily',
-                    days: [],
-                    startDate: yesterdayStr,
-                    endDate: null
-                },
-                reminder: {
-                    enabled: false,
-                    time: '21:00'
+                if (data.categories) {
+                    localStorage.setItem(this.getKey(STORAGE_KEYS.CATEGORIES), JSON.stringify(data.categories));
                 }
-            },
-            {
-                id: 'task_sample_4',
-                title: 'Practice JavaScript',
-                description: 'Build DOM manipulation projects and practice async/await',
-                category: 'Study',
-                priority: 'high',
-                createdAt: yesterdayStr,
-                active: true,
-                schedule: {
-                    type: 'daily',
-                    days: [],
-                    startDate: yesterdayStr,
-                    endDate: null
-                },
-                reminder: {
-                    enabled: false,
-                    time: '17:00'
+                if (data.settings) {
+                    localStorage.setItem(this.getKey(STORAGE_KEYS.SETTINGS), JSON.stringify(data.settings));
                 }
-            },
-            {
-                id: 'task_sample_5',
-                title: 'College Assignment',
-                description: 'Complete Database Management System homework assignment',
-                category: 'Project',
-                priority: 'medium',
-                createdAt: todayStr,
-                active: true,
-                schedule: {
-                    type: 'one_time',
-                    days: [],
-                    startDate: todayStr,
-                    endDate: null
-                },
-                reminder: {
-                    enabled: true,
-                    time: '20:00'
-                }
+                console.log('✓ Successfully restored user data from Cloud Firestore!');
+                return true;
+            } else {
+                console.log('New user detected in Firestore. Initializing clean Cloud document.');
+                await this.syncUserDataToFirestore();
+                return true;
             }
-        ];
+        } catch (err) {
+            console.error('Error fetching user data from Firestore:', err);
+            return false;
+        }
+    },
 
-        const sampleRecords = [
-            // Yesterday's Records
-            {
-                id: 'rec_sample_1_yest',
-                taskId: 'task_sample_1',
-                date: yesterdayStr,
-                status: 'completed',
-                note: 'Practiced arrays and string manipulation.'
-            },
-            {
-                id: 'rec_sample_2_yest',
-                taskId: 'task_sample_2',
-                date: yesterdayStr,
-                status: 'completed',
-                note: '30-minute HIIT workout session done.'
-            },
-            {
-                id: 'rec_sample_3_yest',
-                taskId: 'task_sample_3',
-                date: yesterdayStr,
-                status: 'not_completed',
-                note: 'Had less time today due to college exams.'
-            },
-            {
-                id: 'rec_sample_4_yest',
-                taskId: 'task_sample_4',
-                date: yesterdayStr,
-                status: 'completed',
-                note: 'Solved 3 LeetCode problems in JS.'
-            },
+    /**
+     * Sync local user data to Cloud Firestore
+     */
+    async syncUserDataToFirestore() {
+        if (!this.currentUserId || typeof db === 'undefined' || !db || this.isSyncing) return;
 
-            // Today's Initial Records
-            {
-                id: 'rec_sample_1_today',
-                taskId: 'task_sample_1',
-                date: todayStr,
-                status: 'completed',
-                note: 'Practiced OOP inheritance and interfaces.'
-            },
-            {
-                id: 'rec_sample_2_today',
-                taskId: 'task_sample_2',
-                date: todayStr,
-                status: 'completed',
-                note: 'Morning jog for 45 minutes.'
-            },
-            {
-                id: 'rec_sample_3_today',
-                taskId: 'task_sample_3',
-                date: todayStr,
-                status: 'not_completed',
-                note: 'Will read before bedtime.'
-            },
-            {
-                id: 'rec_sample_4_today',
-                taskId: 'task_sample_4',
-                date: todayStr,
-                status: 'completed',
-                note: 'Built modern Daily Task Tracker UI.'
-            }
-        ];
+        this.isSyncing = true;
+        try {
+            const tasks = this.getTasks();
+            const records = this.getDailyRecords();
+            const categoriesData = localStorage.getItem(this.getKey(STORAGE_KEYS.CATEGORIES));
+            const categories = categoriesData ? JSON.parse(categoriesData) : [];
+            const settings = this.getSettings();
 
-        this.saveTasks(sampleTasks);
-        this.saveDailyRecords(sampleRecords);
-        this.saveSettings({ theme: 'light', userName: 'Rounak' });
-        return true;
+            const userDocRef = db.collection('users').doc(this.currentUserId).collection('userData').doc('main');
+
+            await userDocRef.set({
+                tasks,
+                records,
+                categories,
+                settings,
+                updatedAt: (typeof firebase !== 'undefined' && firebase.firestore) ? firebase.firestore.FieldValue.serverTimestamp() : new Date().toISOString()
+            }, { merge: true });
+
+            console.log('✓ User data synced to Cloud Firestore');
+        } catch (err) {
+            console.error('Error syncing user data to Firestore:', err);
+        } finally {
+            this.isSyncing = false;
+        }
+    },
+
+    /**
+     * Clear active memory & storage user scope upon logout
+     */
+    clearCurrentUserData() {
+        this.currentUserId = null;
     }
 };
