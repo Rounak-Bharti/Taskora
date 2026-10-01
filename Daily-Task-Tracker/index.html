@@ -38,6 +38,12 @@
                             <span>Statistics</span>
                         </a>
                     </li>
+                    <li>
+                        <a href="#" class="nav-link" data-view="settings">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                            <span>Settings</span>
+                        </a>
+                    </li>
                 </ul>
             </nav>
 
@@ -99,6 +105,16 @@
                     <!-- Rendered dynamically by app.js -->
                 </div>
                 <div class="summary-widget-card" id="dashboard-priority-summary">
+                    <!-- Rendered dynamically by app.js -->
+                </div>
+            </div>
+
+            <!-- DASHBOARD SUMMARY WIDGETS (TODAY'S REMINDERS & UPCOMING TASKS) -->
+            <div class="dashboard-summary-row mb-4">
+                <div class="summary-widget-card widget-card-expanded" id="dashboard-today-reminders">
+                    <!-- Rendered dynamically by app.js -->
+                </div>
+                <div class="summary-widget-card widget-card-expanded" id="dashboard-upcoming-tasks">
                     <!-- Rendered dynamically by app.js -->
                 </div>
             </div>
@@ -198,6 +214,35 @@
                 <!-- Rendered by statistics.js -->
             </div>
         </section>
+
+        <!-- ================= VIEW 4: SETTINGS ================= -->
+        <section id="view-settings" class="view-section" style="display: none;">
+            <div class="stats-header">
+                <h2>Application Settings</h2>
+                <p class="section-subtitle">Manage browser notification permissions and task reminder preferences</p>
+            </div>
+
+            <div class="settings-card">
+                <h3 class="settings-card-title">🔔 Browser Notifications & Reminders</h3>
+                <p class="settings-description">
+                    Enable desktop notifications to receive timely alerts when your scheduled task reminders trigger.
+                </p>
+                
+                <div class="settings-status-row mb-4">
+                    <span>Notification Permission Status:</span>
+                    <span id="notification-status-label" class="status-badge pending">Checking...</span>
+                </div>
+
+                <button type="button" class="btn btn-primary mb-4" id="btn-request-notifications">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                    <span>Enable Notifications</span>
+                </button>
+
+                <div class="settings-disclaimer">
+                    <strong>Note on Task Reminders:</strong> Because Taskora is a pure client-side web application using standard browser APIs, desktop notifications require the browser tab to remain open in the background. Timed reminders perform periodic background checks every 30 seconds.
+                </div>
+            </div>
+        </section>
     </main>
 
     <!-- ================= MODAL: ADD TASK ================= -->
@@ -249,6 +294,60 @@
                     </div>
                 </div>
 
+                <!-- Schedule Settings Section -->
+                <div class="form-section-title">Schedule & Recurrence</div>
+                <div class="form-row">
+                    <div class="form-group flex-1">
+                        <label class="form-label" for="add-schedule-type">Schedule Type</label>
+                        <select id="add-schedule-type" class="form-input">
+                            <option value="daily">Daily (Every Day)</option>
+                            <option value="weekly">Weekly (Selected Days)</option>
+                            <option value="custom">Custom Days</option>
+                            <option value="one_time">One Time</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group" id="add-schedule-days-group" style="display: none;">
+                    <label class="form-label">Select Active Days</label>
+                    <div class="days-chips-row" id="add-schedule-days-container">
+                        <button type="button" class="btn-day-chip" data-day="Mon">Mon</button>
+                        <button type="button" class="btn-day-chip" data-day="Tue">Tue</button>
+                        <button type="button" class="btn-day-chip" data-day="Wed">Wed</button>
+                        <button type="button" class="btn-day-chip" data-day="Thu">Thu</button>
+                        <button type="button" class="btn-day-chip" data-day="Fri">Fri</button>
+                        <button type="button" class="btn-day-chip" data-day="Sat">Sat</button>
+                        <button type="button" class="btn-day-chip" data-day="Sun">Sun</button>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group flex-1" id="add-start-date-group">
+                        <label class="form-label" for="add-schedule-start-date">Start Date *</label>
+                        <input type="date" id="add-schedule-start-date" class="form-input">
+                    </div>
+                    <div class="form-group flex-1" id="add-end-date-group">
+                        <label class="form-label" for="add-schedule-end-date">End Date (Optional)</label>
+                        <input type="date" id="add-schedule-end-date" class="form-input">
+                    </div>
+                </div>
+
+                <!-- Reminder Settings Section -->
+                <div class="form-section-title">Daily Reminder</div>
+                <div class="form-row align-items-center">
+                    <div class="form-group flex-1">
+                        <label class="toggle-switch-label">
+                            <input type="checkbox" id="add-reminder-enabled">
+                            <span class="toggle-switch-slider"></span>
+                            <span class="toggle-label-text">Enable Daily Reminder</span>
+                        </label>
+                    </div>
+                    <div class="form-group flex-1" id="add-reminder-time-group" style="display: none;">
+                        <label class="form-label" for="add-reminder-time">Reminder Time</label>
+                        <input type="time" id="add-reminder-time" class="form-input" value="18:00">
+                    </div>
+                </div>
+
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary btn-modal-cancel">Cancel</button>
                     <button type="submit" class="btn btn-primary">Add Task</button>
@@ -297,11 +396,82 @@
                     </div>
                 </div>
 
+                <!-- Schedule Settings Section -->
+                <div class="form-section-title">Schedule & Recurrence</div>
+                <div class="form-row">
+                    <div class="form-group flex-1">
+                        <label class="form-label" for="edit-schedule-type">Schedule Type</label>
+                        <select id="edit-schedule-type" class="form-input">
+                            <option value="daily">Daily (Every Day)</option>
+                            <option value="weekly">Weekly (Selected Days)</option>
+                            <option value="custom">Custom Days</option>
+                            <option value="one_time">One Time</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group" id="edit-schedule-days-group" style="display: none;">
+                    <label class="form-label">Select Active Days</label>
+                    <div class="days-chips-row" id="edit-schedule-days-container">
+                        <button type="button" class="btn-day-chip" data-day="Mon">Mon</button>
+                        <button type="button" class="btn-day-chip" data-day="Tue">Tue</button>
+                        <button type="button" class="btn-day-chip" data-day="Wed">Wed</button>
+                        <button type="button" class="btn-day-chip" data-day="Thu">Thu</button>
+                        <button type="button" class="btn-day-chip" data-day="Fri">Fri</button>
+                        <button type="button" class="btn-day-chip" data-day="Sat">Sat</button>
+                        <button type="button" class="btn-day-chip" data-day="Sun">Sun</button>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group flex-1" id="edit-start-date-group">
+                        <label class="form-label" for="edit-schedule-start-date">Start Date *</label>
+                        <input type="date" id="edit-schedule-start-date" class="form-input">
+                    </div>
+                    <div class="form-group flex-1" id="edit-end-date-group">
+                        <label class="form-label" for="edit-schedule-end-date">End Date (Optional)</label>
+                        <input type="date" id="edit-schedule-end-date" class="form-input">
+                    </div>
+                </div>
+
+                <!-- Reminder Settings Section -->
+                <div class="form-section-title">Daily Reminder</div>
+                <div class="form-row align-items-center">
+                    <div class="form-group flex-1">
+                        <label class="toggle-switch-label">
+                            <input type="checkbox" id="edit-reminder-enabled">
+                            <span class="toggle-switch-slider"></span>
+                            <span class="toggle-label-text">Enable Daily Reminder</span>
+                        </label>
+                    </div>
+                    <div class="form-group flex-1" id="edit-reminder-time-group" style="display: none;">
+                        <label class="form-label" for="edit-reminder-time">Reminder Time</label>
+                        <input type="time" id="edit-reminder-time" class="form-input" value="18:00">
+                    </div>
+                </div>
+
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary btn-modal-cancel">Cancel</button>
                     <button type="submit" class="btn btn-primary">Save Changes</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- ================= MODAL: TASK DETAILS ================= -->
+    <div class="modal" id="modal-task-details">
+        <div class="modal-backdrop"></div>
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <h3 class="modal-title">Task Details</h3>
+                <button type="button" class="btn-icon modal-close" aria-label="Close Modal">&times;</button>
+            </div>
+            <div class="modal-body" id="task-details-body">
+                <!-- Populated dynamically by app.js -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-modal-cancel">Close</button>
+            </div>
         </div>
     </div>
 
