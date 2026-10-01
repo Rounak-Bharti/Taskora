@@ -68,7 +68,19 @@ const HistoryManager = {
      */
     getTasksAvailableOnDate(dateStr) {
         const tasks = Storage.getTasks();
-        return tasks.filter(task => task.createdAt <= dateStr);
+        return tasks.filter(task => {
+            // Task must be created on or before dateStr
+            if (task.createdAt > dateStr) return false;
+
+            // If task was deleted, it must NOT appear on or after deletion date (Rule 36)
+            if (task.deletedAt && dateStr >= task.deletedAt) return false;
+
+            // Legacy soft-deleted check if deletedAt is missing
+            if (!task.active && !task.deletedAt) return false;
+
+            // Task must be scheduled for dateStr
+            return TaskManager.isTaskScheduledForDate(task, dateStr);
+        });
     },
 
     /**

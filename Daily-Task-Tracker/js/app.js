@@ -1329,7 +1329,7 @@ const App = {
         if (!this.deletingTaskId) return;
 
         try {
-            TaskManager.deleteTask(this.deletingTaskId);
+            TaskManager.deleteTask(this.deletingTaskId, this.todayDateStr);
             this.closeModals();
             this.renderDashboard();
             this.showToast('✓ Task removed from active tracking (history preserved)', 'info');
