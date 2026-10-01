@@ -828,7 +828,7 @@ const App = {
                             id="note-${task.id}"
                             class="task-note-textarea" 
                             data-task-id="${task.id}" 
-                            placeholder="Add a note about today's progress..."
+                            placeholder="What did you do today?"
                             rows="2"
                         >${this.escapeHtml(task.note || '')}</textarea>
                         <button type="button" class="btn btn-sm btn-secondary btn-save-note" data-task-id="${task.id}">Save Note</button>
