@@ -1,5 +1,5 @@
 /**
- * App Module - Central Coordinator for UI, Events, Navigation, Modals, and Toasts
+ * App Module - Central Coordinator for UI, Events, Navigation, Advanced Task Management, Modals & Toasts
  */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -11,11 +11,14 @@ const App = {
     currentView: 'dashboard', // 'dashboard' | 'history' | 'statistics'
     searchQuery: '',
     statusFilter: 'all', // 'all' | 'completed' | 'incomplete'
-    sortBy: 'default', // 'default' | 'newest' | 'oldest' | 'completed_first' | 'incomplete_first'
+    priorityFilter: 'all', // 'all' | 'high' | 'medium' | 'low'
+    categoryFilter: 'all', // 'all' | 'Study' | 'Work' ...
+    sortBy: 'default', // 'default' | 'newest' | 'oldest' | 'priority_high' | 'priority_low' | 'alphabetical' | 'completed_first' | 'incomplete_first'
 
     // Modal state
     editingTaskId: null,
     deletingTaskId: null,
+    viewingHistoryTaskId: null,
 
     init() {
         // 1. Detect local date YYYY-MM-DD
@@ -33,10 +36,13 @@ const App = {
         // 5. Update header info (Date, Greeting)
         this.updateHeaderInfo();
 
-        // 6. Bind all UI event listeners
+        // 6. Populate Category Dropdowns
+        this.populateCategoryDropdowns();
+
+        // 7. Bind all UI event listeners
         this.bindEvents();
 
-        // 7. Initial View render
+        // 8. Initial View render
         this.switchView('dashboard');
     },
 
@@ -125,6 +131,34 @@ const App = {
     },
 
     /**
+     * Populate Category Dropdowns dynamically (Predefined + Custom categories)
+     */
+    populateCategoryDropdowns() {
+        const categories = Storage.getCategories();
+
+        // 1. Add Task Category select
+        const addSelect = document.getElementById('add-task-category');
+        if (addSelect) {
+            addSelect.innerHTML = categories.map(c => `<option value="${c}">${c}</option>`).join('');
+        }
+
+        // 2. Edit Task Category select
+        const editSelect = document.getElementById('edit-task-category');
+        if (editSelect) {
+            editSelect.innerHTML = categories.map(c => `<option value="${c}">${c}</option>`).join('');
+        }
+
+        // 3. Filter Category select
+        const filterSelect = document.getElementById('filter-category-select');
+        if (filterSelect) {
+            const currentVal = this.categoryFilter;
+            filterSelect.innerHTML = `<option value="all">Category: All</option>` + 
+                categories.map(c => `<option value="${c}">Category: ${c}</option>`).join('');
+            filterSelect.value = currentVal;
+        }
+    },
+
+    /**
      * View Switcher Navigation
      */
     switchView(viewName) {
@@ -185,6 +219,14 @@ const App = {
             this.openAddModal();
         });
 
+        // Add Custom Category triggers
+        document.getElementById('btn-open-add-category')?.addEventListener('click', () => {
+            this.openAddCategoryModal();
+        });
+        document.getElementById('btn-open-add-category-edit')?.addEventListener('click', () => {
+            this.openAddCategoryModal();
+        });
+
         // Modal close buttons
         document.querySelectorAll('.modal-close, .btn-modal-cancel').forEach(btn => {
             btn.addEventListener('click', () => {
@@ -201,10 +243,18 @@ const App = {
             });
         });
 
-        // Global ESC key to close modal
+        // Global ESC key to close modal & dismiss menus
         window.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 this.closeModals();
+                this.closeAllDropdownMenus();
+            }
+        });
+
+        // Dismiss dropdown menus when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.task-menu-container')) {
+                this.closeAllDropdownMenus();
             }
         });
 
@@ -218,6 +268,12 @@ const App = {
         document.getElementById('form-edit-task')?.addEventListener('submit', (e) => {
             e.preventDefault();
             this.handleEditTaskSubmit();
+        });
+
+        // Form Submit: Add Custom Category
+        document.getElementById('form-add-category')?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.handleAddCategorySubmit();
         });
 
         // Confirm Delete Task
@@ -234,7 +290,7 @@ const App = {
             });
         }
 
-        // Status Filter Buttons
+        // Status Filter Chips
         document.querySelectorAll('.filter-chip').forEach(chip => {
             chip.addEventListener('click', () => {
                 document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
@@ -244,7 +300,25 @@ const App = {
             });
         });
 
-        // Sort Dropdown
+        // Priority Filter Select
+        const prioritySelect = document.getElementById('filter-priority-select');
+        if (prioritySelect) {
+            prioritySelect.addEventListener('change', (e) => {
+                this.priorityFilter = e.target.value;
+                this.renderDashboard();
+            });
+        }
+
+        // Category Filter Select
+        const categorySelect = document.getElementById('filter-category-select');
+        if (categorySelect) {
+            categorySelect.addEventListener('change', (e) => {
+                this.categoryFilter = e.target.value;
+                this.renderDashboard();
+            });
+        }
+
+        // Sort Select
         const sortSelect = document.getElementById('sort-task-select');
         if (sortSelect) {
             sortSelect.addEventListener('change', (e) => {
@@ -252,6 +326,52 @@ const App = {
                 this.renderDashboard();
             });
         }
+
+        // Clear Filters Buttons
+        document.getElementById('btn-clear-filters')?.addEventListener('click', () => {
+            this.clearFilters();
+        });
+        document.getElementById('btn-empty-clear-filters')?.addEventListener('click', () => {
+            this.clearFilters();
+        });
+    },
+
+    /**
+     * Clear all search, filter, and sort criteria (Section 14)
+     */
+    clearFilters() {
+        this.searchQuery = '';
+        this.statusFilter = 'all';
+        this.priorityFilter = 'all';
+        this.categoryFilter = 'all';
+        this.sortBy = 'default';
+
+        const searchInput = document.getElementById('search-task-input');
+        if (searchInput) searchInput.value = '';
+
+        document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+        document.getElementById('chip-status-all')?.classList.add('active');
+
+        const pSel = document.getElementById('filter-priority-select');
+        if (pSel) pSel.value = 'all';
+
+        const cSel = document.getElementById('filter-category-select');
+        if (cSel) cSel.value = 'all';
+
+        const sSel = document.getElementById('sort-task-select');
+        if (sSel) sSel.value = 'default';
+
+        this.renderDashboard();
+        this.showToast('All search & filters reset', 'info');
+    },
+
+    /**
+     * Close all active task three-dot dropdown menus
+     */
+    closeAllDropdownMenus() {
+        document.querySelectorAll('.task-dropdown-menu').forEach(menu => {
+            menu.style.display = 'none';
+        });
     },
 
     /**
@@ -273,13 +393,31 @@ const App = {
         if (countRemainingText) countRemainingText.textContent = progress.remaining;
         if (countTotalText) countTotalText.textContent = progress.total;
 
-        // Fetch Dashboard Tasks
-        const tasks = TaskManager.getTasksForDashboard(
+        // Update Status Filter Counts
+        const statusCounts = TaskManager.getStatusCounts(this.todayDateStr);
+        document.getElementById('cnt-status-all') && (document.getElementById('cnt-status-all').textContent = statusCounts.all);
+        document.getElementById('cnt-status-completed') && (document.getElementById('cnt-status-completed').textContent = statusCounts.completed);
+        document.getElementById('cnt-status-incomplete') && (document.getElementById('cnt-status-incomplete').textContent = statusCounts.incomplete);
+
+        // Fetch Dashboard Filtered Tasks
+        const tasks = TaskManager.getFilteredAndSortedTasks(
             this.todayDateStr,
             this.searchQuery,
             this.statusFilter,
+            this.priorityFilter,
+            this.categoryFilter,
             this.sortBy
         );
+
+        const availableCount = TaskManager.getStatusCounts(this.todayDateStr).all;
+        const resultCountEl = document.getElementById('filter-result-count');
+        if (resultCountEl) {
+            resultCountEl.textContent = `Showing ${tasks.length} of ${availableCount} tasks`;
+        }
+
+        // Render Summary Widgets (Category & Priority)
+        this.renderCategorySummaryWidget();
+        this.renderPrioritySummaryWidget();
 
         const container = document.getElementById('tasks-container');
         const emptyState = document.getElementById('tasks-empty-state');
@@ -290,13 +428,12 @@ const App = {
             container.innerHTML = '';
             if (emptyState) {
                 emptyState.style.display = 'flex';
-                // Customize empty state message if caused by search/filter
                 const emptyTitle = emptyState.querySelector('.empty-title');
                 const emptyText = emptyState.querySelector('.empty-text');
                 
-                if (this.searchQuery || this.statusFilter !== 'all') {
+                if (this.searchQuery || this.statusFilter !== 'all' || this.priorityFilter !== 'all' || this.categoryFilter !== 'all') {
                     if (emptyTitle) emptyTitle.textContent = 'No matching tasks found';
-                    if (emptyText) emptyText.textContent = 'Try adjusting your search query or filter criteria.';
+                    if (emptyText) emptyText.textContent = 'Try adjusting or clearing your search and filter criteria.';
                 } else {
                     if (emptyTitle) emptyTitle.textContent = 'No tasks yet';
                     if (emptyText) emptyText.textContent = 'Start building your daily routine by adding your first task.';
@@ -315,36 +452,103 @@ const App = {
     },
 
     /**
-     * Generate HTML for a single task card
+     * Render Dashboard Category Summary Widget
+     */
+    renderCategorySummaryWidget() {
+        const container = document.getElementById('dashboard-category-summary');
+        if (!container) return;
+
+        const summary = TaskManager.getCategorySummary(this.todayDateStr);
+        const categories = Object.keys(summary);
+
+        if (categories.length === 0) {
+            container.innerHTML = `<span class="widget-label">Categories:</span> <span class="empty-widget-text">No active tasks</span>`;
+            return;
+        }
+
+        const pillsHtml = categories.map(cat => `
+            <span class="widget-pill category-pill-sm" data-category="${cat}">
+                <strong>${this.escapeHtml(cat)}</strong> (${summary[cat]})
+            </span>
+        `).join('');
+
+        container.innerHTML = `
+            <span class="widget-label">Categories:</span>
+            <div class="widget-pills-row">${pillsHtml}</div>
+        `;
+    },
+
+    /**
+     * Render Dashboard Priority Summary Widget
+     */
+    renderPrioritySummaryWidget() {
+        const container = document.getElementById('dashboard-priority-summary');
+        if (!container) return;
+
+        const counts = TaskManager.getPriorityCounts(this.todayDateStr);
+
+        container.innerHTML = `
+            <span class="widget-label">Priority:</span>
+            <div class="widget-pills-row">
+                <span class="widget-pill priority-pill-sm high">High (${counts.high})</span>
+                <span class="widget-pill priority-pill-sm medium">Medium (${counts.medium})</span>
+                <span class="widget-pill priority-pill-sm low">Low (${counts.low})</span>
+            </div>
+        `;
+    },
+
+    /**
+     * Generate HTML for a single task card (Redesigned per Section 5, 6, 19)
      */
     createTaskCardHtml(task) {
         const isCompleted = task.status === 'completed';
         const statusBadgeText = isCompleted ? 'Completed' : 'Incomplete';
         const cardClass = isCompleted ? 'task-card completed' : 'task-card';
 
+        const priorityLabel = (task.priority || 'medium').toUpperCase();
+        const categoryLabel = task.category || 'General';
+        const createdDateFormatted = this.formatFullDate(task.createdAt);
+
         return `
             <div class="${cardClass}" data-task-id="${task.id}">
                 <div class="task-card-header">
                     <div class="task-title-group">
-                        <button type="button" class="btn-toggle-status ${isCompleted ? 'checked' : ''}" data-task-id="${task.id}" aria-label="Toggle Completion">
+                        <button type="button" class="btn-toggle-status ${isCompleted ? 'checked' : ''}" data-task-id="${task.id}" title="Toggle Completion">
                             ${isCompleted ? 
                                 `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>` : 
                                 ``
                             }
                         </button>
                         <div>
-                            <h3 class="task-title">${this.escapeHtml(task.title)}</h3>
+                            <h3 class="task-title ${isCompleted ? 'line-through' : ''}">${this.escapeHtml(task.title)}</h3>
                             ${task.description ? `<p class="task-description">${this.escapeHtml(task.description)}</p>` : ''}
                         </div>
                     </div>
-                    <div class="task-card-actions">
-                        <button type="button" class="btn-icon btn-edit-task" data-task-id="${task.id}" title="Edit Task">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+
+                    <!-- Three-Dot Menu -->
+                    <div class="task-menu-container">
+                        <button type="button" class="btn-icon btn-task-menu" data-task-id="${task.id}" title="Task Options" aria-label="Task Options">
+                            ⋮
                         </button>
-                        <button type="button" class="btn-icon btn-delete-task danger" data-task-id="${task.id}" title="Delete Task">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                        </button>
+                        <div class="task-dropdown-menu" id="menu-${task.id}" style="display: none;">
+                            <button type="button" class="dropdown-item btn-edit-task" data-task-id="${task.id}">
+                                ✏️ Edit Task
+                            </button>
+                            <button type="button" class="dropdown-item btn-task-history" data-task-id="${task.id}">
+                                📜 View History
+                            </button>
+                            <div class="dropdown-divider"></div>
+                            <button type="button" class="dropdown-item danger btn-delete-task" data-task-id="${task.id}">
+                                🗑️ Delete Task
+                            </button>
+                        </div>
                     </div>
+                </div>
+
+                <!-- Badges Row (Category & Priority) -->
+                <div class="task-badges-row">
+                    <span class="badge category-badge">📁 ${this.escapeHtml(categoryLabel)}</span>
+                    <span class="badge priority-badge ${task.priority}">${priorityLabel} PRIORITY</span>
                 </div>
 
                 <!-- Daily Note Box -->
@@ -366,7 +570,10 @@ const App = {
                 </div>
 
                 <div class="task-card-footer">
-                    <span class="status-badge ${isCompleted ? 'completed' : 'pending'}">${statusBadgeText}</span>
+                    <div class="footer-left">
+                        <span class="status-badge ${isCompleted ? 'completed' : 'pending'}">${statusBadgeText}</span>
+                        <span class="created-date-tag">Created ${createdDateFormatted}</span>
+                    </div>
                     <button type="button" class="btn btn-sm ${isCompleted ? 'btn-secondary' : 'btn-primary'} btn-toggle-status-main" data-task-id="${task.id}">
                         ${isCompleted ? 'Mark Incomplete' : 'Mark Complete'}
                     </button>
@@ -391,17 +598,47 @@ const App = {
             });
         });
 
+        // Three-Dot Menu Button Toggle
+        container.querySelectorAll('.btn-task-menu').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const taskId = btn.getAttribute('data-task-id');
+                const menu = document.getElementById(`menu-${taskId}`);
+                
+                const isVisible = menu && menu.style.display === 'block';
+                this.closeAllDropdownMenus();
+
+                if (menu && !isVisible) {
+                    menu.style.display = 'block';
+                }
+            });
+        });
+
         // Edit Button
         container.querySelectorAll('.btn-edit-task').forEach(btn => {
-            btn.addEventListener('click', () => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.closeAllDropdownMenus();
                 const taskId = btn.getAttribute('data-task-id');
                 this.openEditModal(taskId);
             });
         });
 
+        // View Task History Button
+        container.querySelectorAll('.btn-task-history').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.closeAllDropdownMenus();
+                const taskId = btn.getAttribute('data-task-id');
+                this.openTaskHistoryModal(taskId);
+            });
+        });
+
         // Delete Button
         container.querySelectorAll('.btn-delete-task').forEach(btn => {
-            btn.addEventListener('click', () => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.closeAllDropdownMenus();
                 const taskId = btn.getAttribute('data-task-id');
                 this.openDeleteModal(taskId);
             });
@@ -461,15 +698,24 @@ const App = {
      */
     openAddModal() {
         this.closeModals();
+        this.populateCategoryDropdowns();
+
         const modal = document.getElementById('modal-add-task');
         const form = document.getElementById('form-add-task');
         if (form) form.reset();
+
+        // Default priority radio medium checked
+        const mediumRadio = form?.querySelector('input[name="add-priority"][value="medium"]');
+        if (mediumRadio) mediumRadio.checked = true;
+
         if (modal) modal.classList.add('active');
         document.getElementById('add-task-title')?.focus();
     },
 
     openEditModal(taskId) {
         this.closeModals();
+        this.populateCategoryDropdowns();
+
         const tasks = Storage.getTasks();
         const task = tasks.find(t => t.id === taskId);
         if (!task) return;
@@ -478,12 +724,80 @@ const App = {
         const modal = document.getElementById('modal-edit-task');
         const titleInput = document.getElementById('edit-task-title');
         const descInput = document.getElementById('edit-task-desc');
+        const catSelect = document.getElementById('edit-task-category');
+        const prioSelect = document.getElementById('edit-task-priority');
 
         if (titleInput) titleInput.value = task.title;
         if (descInput) descInput.value = task.description || '';
+        if (catSelect) catSelect.value = task.category || 'General';
+        if (prioSelect) prioSelect.value = (task.priority || 'medium').toLowerCase();
 
         if (modal) modal.classList.add('active');
         titleInput?.focus();
+    },
+
+    openAddCategoryModal() {
+        const modal = document.getElementById('modal-add-category');
+        const form = document.getElementById('form-add-category');
+        if (form) form.reset();
+        if (modal) modal.classList.add('active');
+        document.getElementById('custom-category-name')?.focus();
+    },
+
+    openTaskHistoryModal(taskId) {
+        this.closeModals();
+        this.viewingHistoryTaskId = taskId;
+
+        const historyInfo = TaskManager.getTaskHistory(taskId);
+        if (!historyInfo) return;
+
+        const modal = document.getElementById('modal-task-history');
+        const titleEl = document.getElementById('task-history-title');
+        const metaEl = document.getElementById('task-history-meta');
+        const bodyEl = document.getElementById('task-history-body');
+
+        if (titleEl) titleEl.textContent = `${historyInfo.task.title} — History`;
+        if (metaEl) metaEl.textContent = `📁 ${historyInfo.task.category} • 🔥 ${historyInfo.task.priority.toUpperCase()} Priority • Created ${this.formatFullDate(historyInfo.task.createdAt)}`;
+
+        let recordsHtml = '';
+        if (historyInfo.records.length === 0) {
+            recordsHtml = `<p class="empty-text">No historical daily records recorded yet for this task.</p>`;
+        } else {
+            recordsHtml = historyInfo.records.map(rec => `
+                <div class="task-history-item ${rec.status === 'completed' ? 'completed' : ''}">
+                    <div class="task-history-item-header">
+                        <span class="history-item-date">${this.formatFullDate(rec.date)}</span>
+                        <span class="status-badge ${rec.status === 'completed' ? 'completed' : 'pending'}">
+                            ${rec.status === 'completed' ? '✓ Completed' : '✗ Incomplete'}
+                        </span>
+                    </div>
+                    <div class="task-history-item-note">
+                        <span class="note-tag">Note:</span> ${rec.note ? this.escapeHtml(rec.note) : 'No note recorded'}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        if (bodyEl) {
+            bodyEl.innerHTML = `
+                <div class="task-history-summary-box mb-4">
+                    <div class="stat-pill">
+                        <strong>${historyInfo.completionRate}%</strong> Completion Rate
+                    </div>
+                    <div class="stat-pill">
+                        <strong>${historyInfo.completedCount}</strong> Completed Days
+                    </div>
+                    <div class="stat-pill">
+                        <strong>${historyInfo.totalRecords}</strong> Total Days
+                    </div>
+                </div>
+                <div class="task-history-timeline">
+                    ${recordsHtml}
+                </div>
+            `;
+        }
+
+        if (modal) modal.classList.add('active');
     },
 
     openDeleteModal(taskId) {
@@ -497,14 +811,19 @@ const App = {
         document.querySelectorAll('.modal').forEach(m => m.classList.remove('active'));
         this.editingTaskId = null;
         this.deletingTaskId = null;
+        this.viewingHistoryTaskId = null;
     },
 
     handleAddTaskSubmit() {
         const titleInput = document.getElementById('add-task-title');
         const descInput = document.getElementById('add-task-desc');
+        const catSelect = document.getElementById('add-task-category');
+        const prioRadio = document.querySelector('input[name="add-priority"]:checked');
 
         const title = titleInput?.value.trim();
         const desc = descInput?.value.trim();
+        const category = catSelect?.value || 'General';
+        const priority = prioRadio?.value || 'medium';
 
         if (!title) {
             this.showToast('Task title is required', 'warning');
@@ -512,7 +831,7 @@ const App = {
         }
 
         try {
-            TaskManager.createTask(title, desc, this.todayDateStr);
+            TaskManager.createTask(title, desc, category, priority, this.todayDateStr);
             this.closeModals();
             this.renderDashboard();
             this.showToast('✓ Task added successfully', 'success');
@@ -526,9 +845,13 @@ const App = {
 
         const titleInput = document.getElementById('edit-task-title');
         const descInput = document.getElementById('edit-task-desc');
+        const catSelect = document.getElementById('edit-task-category');
+        const prioSelect = document.getElementById('edit-task-priority');
 
         const title = titleInput?.value.trim();
         const desc = descInput?.value.trim();
+        const category = catSelect?.value || 'General';
+        const priority = prioSelect?.value || 'medium';
 
         if (!title) {
             this.showToast('Task title is required', 'warning');
@@ -536,12 +859,41 @@ const App = {
         }
 
         try {
-            TaskManager.editTask(this.editingTaskId, title, desc);
+            TaskManager.editTask(this.editingTaskId, title, desc, category, priority);
             this.closeModals();
             this.renderDashboard();
             this.showToast('✓ Task updated successfully', 'success');
         } catch (err) {
             this.showToast(err.message || 'Error updating task', 'error');
+        }
+    },
+
+    handleAddCategorySubmit() {
+        const nameInput = document.getElementById('custom-category-name');
+        const name = nameInput?.value.trim();
+
+        if (!name) {
+            this.showToast('Category name cannot be empty', 'warning');
+            return;
+        }
+
+        try {
+            Storage.addCategory(name);
+            this.populateCategoryDropdowns();
+
+            // Set new category in active selects
+            const addSelect = document.getElementById('add-task-category');
+            if (addSelect) addSelect.value = name;
+
+            const editSelect = document.getElementById('edit-task-category');
+            if (editSelect) editSelect.value = name;
+
+            const modal = document.getElementById('modal-add-category');
+            if (modal) modal.classList.remove('active');
+
+            this.showToast(`✓ Category "${name}" added`, 'success');
+        } catch (err) {
+            this.showToast(err.message || 'Error adding category', 'error');
         }
     },
 
@@ -580,10 +932,8 @@ const App = {
 
         container.appendChild(toast);
 
-        // Animate in
         setTimeout(() => toast.classList.add('show'), 10);
 
-        // Auto remove after 3s
         setTimeout(() => {
             toast.classList.remove('show');
             setTimeout(() => toast.remove(), 300);

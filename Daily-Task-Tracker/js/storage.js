@@ -2,26 +2,59 @@
  * Storage Module - Manages LocalStorage operations for Daily Task Tracker
  * 
  * Keys:
- * - dailyTaskTracker_tasks: Permanent task objects
+ * - dailyTaskTracker_tasks: Permanent task objects (with category & priority)
  * - dailyTaskTracker_dailyRecords: Daily tracking records (status & notes per date)
  * - dailyTaskTracker_settings: User preferences & theme settings
+ * - dailyTaskTracker_categories: Custom categories list
  */
 
 const STORAGE_KEYS = {
     TASKS: 'dailyTaskTracker_tasks',
     RECORDS: 'dailyTaskTracker_dailyRecords',
-    SETTINGS: 'dailyTaskTracker_settings'
+    SETTINGS: 'dailyTaskTracker_settings',
+    CATEGORIES: 'dailyTaskTracker_categories'
 };
+
+const DEFAULT_CATEGORIES = [
+    'General',
+    'Study',
+    'Work',
+    'Health',
+    'Personal',
+    'Fitness',
+    'Project',
+    'Other'
+];
 
 const Storage = {
     /**
-     * Get all permanent tasks from LocalStorage
+     * Get all permanent tasks from LocalStorage with defaults for category & priority
      * @returns {Array} Array of task objects
      */
     getTasks() {
         try {
             const data = localStorage.getItem(STORAGE_KEYS.TASKS);
-            return data ? JSON.parse(data) : [];
+            if (!data) return [];
+
+            const tasks = JSON.parse(data);
+            // Upgrade legacy tasks to ensure category and priority exist
+            let updated = false;
+            tasks.forEach(t => {
+                if (!t.category) {
+                    t.category = 'General';
+                    updated = true;
+                }
+                if (!t.priority) {
+                    t.priority = 'medium';
+                    updated = true;
+                }
+            });
+
+            if (updated) {
+                this.saveTasks(tasks);
+            }
+
+            return tasks;
         } catch (error) {
             console.error('Error reading tasks from LocalStorage:', error);
             return [];
@@ -38,6 +71,58 @@ const Storage = {
         } catch (error) {
             console.error('Error saving tasks to LocalStorage:', error);
         }
+    },
+
+    /**
+     * Get categories list (Predefined + Custom)
+     * @returns {Array} Array of category name strings
+     */
+    getCategories() {
+        try {
+            const data = localStorage.getItem(STORAGE_KEYS.CATEGORIES);
+            const customCategories = data ? JSON.parse(data) : [];
+            
+            // Merge predefined and custom categories without duplicates
+            const combined = [...DEFAULT_CATEGORIES];
+            customCategories.forEach(c => {
+                if (!combined.includes(c)) {
+                    combined.push(c);
+                }
+            });
+            return combined;
+        } catch (error) {
+            console.error('Error reading categories from LocalStorage:', error);
+            return [...DEFAULT_CATEGORIES];
+        }
+    },
+
+    /**
+     * Add a new custom category
+     * @param {string} categoryName 
+     * @returns {Array} Updated categories list
+     */
+    addCategory(categoryName) {
+        if (!categoryName || !categoryName.trim()) {
+            throw new Error('Category name cannot be empty');
+        }
+
+        const name = categoryName.trim();
+        const existing = this.getCategories();
+
+        if (existing.some(c => c.toLowerCase() === name.toLowerCase())) {
+            throw new Error('Category already exists');
+        }
+
+        try {
+            const data = localStorage.getItem(STORAGE_KEYS.CATEGORIES);
+            const customCategories = data ? JSON.parse(data) : [];
+            customCategories.push(name);
+            localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(customCategories));
+        } catch (error) {
+            console.error('Error saving category to LocalStorage:', error);
+        }
+
+        return this.getCategories();
     },
 
     /**
@@ -111,6 +196,7 @@ const Storage = {
 
     /**
      * Save or update a single daily record
+     * Note: Daily records ONLY store status and note (Rule 23)
      * @param {string} taskId Task ID
      * @param {string} dateStr Date string YYYY-MM-DD
      * @param {string} status 'completed' or 'not_completed'
@@ -150,7 +236,6 @@ const Storage = {
             return false;
         }
 
-        // Get local date strings for today and yesterday
         const now = new Date();
         
         const formatDateKey = (d) => {
@@ -171,6 +256,8 @@ const Storage = {
                 id: 'task_sample_1',
                 title: 'Study Java',
                 description: 'Practice core Java concepts, OOP, and data structures for 1 hour',
+                category: 'Study',
+                priority: 'high',
                 createdAt: yesterdayStr,
                 active: true
             },
@@ -178,6 +265,8 @@ const Storage = {
                 id: 'task_sample_2',
                 title: 'Workout',
                 description: '30-minute cardio and strength training routine',
+                category: 'Fitness',
+                priority: 'medium',
                 createdAt: yesterdayStr,
                 active: true
             },
@@ -185,6 +274,8 @@ const Storage = {
                 id: 'task_sample_3',
                 title: 'Read Book',
                 description: 'Read 20 pages of Atomic Habits',
+                category: 'Personal',
+                priority: 'low',
                 createdAt: yesterdayStr,
                 active: true
             },
@@ -192,6 +283,8 @@ const Storage = {
                 id: 'task_sample_4',
                 title: 'Practice JavaScript',
                 description: 'Build DOM manipulation projects and practice async/await',
+                category: 'Study',
+                priority: 'high',
                 createdAt: yesterdayStr,
                 active: true
             },
@@ -199,6 +292,8 @@ const Storage = {
                 id: 'task_sample_5',
                 title: 'College Assignment',
                 description: 'Complete Database Management System homework assignment',
+                category: 'Project',
+                priority: 'medium',
                 createdAt: todayStr,
                 active: true
             }
@@ -235,7 +330,7 @@ const Storage = {
                 note: 'Solved 3 LeetCode problems in JS.'
             },
 
-            // Today's Initial Records (sample)
+            // Today's Initial Records
             {
                 id: 'rec_sample_1_today',
                 taskId: 'task_sample_1',

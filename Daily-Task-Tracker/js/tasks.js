@@ -1,5 +1,6 @@
 /**
- * Tasks Module - Handles Task management, Filtering, Sorting, and Daily Record operations
+ * Tasks Module - Handles Task Creation, Editing, Soft Deletion, Status Toggling, Notes,
+ * Advanced Multi-Criteria Filtering, Priority Sorting, and Task History Inspection
  */
 
 const TaskManager = {
@@ -7,10 +8,12 @@ const TaskManager = {
      * Create a new permanent task
      * @param {string} title Task Title (required)
      * @param {string} description Task Description (optional)
-     * @param {string} dateStr Creation date string YYYY-MM-DD
+     * @param {string} category Task Category (default 'General')
+     * @param {string} priority Task Priority ('low' | 'medium' | 'high')
+     * @param {string} dateStr Creation date YYYY-MM-DD
      * @returns {Object} New task object
      */
-    createTask(title, description = '', dateStr) {
+    createTask(title, description = '', category = 'General', priority = 'medium', dateStr) {
         if (!title || !title.trim()) {
             throw new Error('Task title is required');
         }
@@ -20,6 +23,8 @@ const TaskManager = {
             id: 'task_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
             title: title.trim(),
             description: description.trim(),
+            category: category ? category.trim() : 'General',
+            priority: (priority && ['low', 'medium', 'high'].includes(priority.toLowerCase())) ? priority.toLowerCase() : 'medium',
             createdAt: dateStr,
             active: true
         };
@@ -27,20 +32,17 @@ const TaskManager = {
         tasks.push(newTask);
         Storage.saveTasks(tasks);
 
-        // Initialize daily record for the creation date
+        // Initialize daily record for creation date
         Storage.saveRecord(newTask.id, dateStr, 'not_completed', '');
 
         return newTask;
     },
 
     /**
-     * Edit an existing task's title and description
-     * @param {string} taskId Task ID
-     * @param {string} title Updated Title
-     * @param {string} description Updated Description
-     * @returns {Object} Updated task object
+     * Edit an existing task's title, description, category, and priority
+     * Preserves task ID, creation date, active state, and historical records (Rule 18)
      */
-    editTask(taskId, title, description = '') {
+    editTask(taskId, title, description = '', category = 'General', priority = 'medium') {
         if (!title || !title.trim()) {
             throw new Error('Task title is required');
         }
@@ -54,6 +56,8 @@ const TaskManager = {
 
         tasks[taskIndex].title = title.trim();
         tasks[taskIndex].description = description.trim();
+        tasks[taskIndex].category = category ? category.trim() : 'General';
+        tasks[taskIndex].priority = (priority && ['low', 'medium', 'high'].includes(priority.toLowerCase())) ? priority.toLowerCase() : 'medium';
 
         Storage.saveTasks(tasks);
         return tasks[taskIndex];
@@ -61,8 +65,7 @@ const TaskManager = {
 
     /**
      * Soft delete a task (sets active = false)
-     * Historical data remains intact.
-     * @param {string} taskId Task ID
+     * Historical records remain preserved.
      */
     deleteTask(taskId) {
         const tasks = Storage.getTasks();
@@ -75,10 +78,7 @@ const TaskManager = {
     },
 
     /**
-     * Toggle daily status of a task for a given date
-     * @param {string} taskId Task ID
-     * @param {string} dateStr Date YYYY-MM-DD
-     * @returns {string} New status ('completed' or 'not_completed')
+     * Toggle daily completion status for a given task and date
      */
     toggleStatus(taskId, dateStr) {
         const record = Storage.getRecord(taskId, dateStr);
@@ -91,10 +91,7 @@ const TaskManager = {
     },
 
     /**
-     * Update daily note for a task on a specific date
-     * @param {string} taskId Task ID
-     * @param {string} dateStr Date YYYY-MM-DD
-     * @param {string} note Note content
+     * Update daily note for a given task and date
      */
     updateNote(taskId, dateStr, note) {
         const record = Storage.getRecord(taskId, dateStr);
@@ -102,24 +99,103 @@ const TaskManager = {
         Storage.saveRecord(taskId, dateStr, currentStatus, note);
     },
 
+    // ==========================================
+    // MODULAR FILTERING & SORTING PIPELINE
+    // ==========================================
+
     /**
-     * Get active tasks available on a specific date with daily record merged
-     * @param {string} dateStr Date YYYY-MM-DD
-     * @param {string} searchKeyword Search term
-     * @param {string} statusFilter 'all', 'completed', 'incomplete'
-     * @param {string} sortBy 'default', 'newest', 'oldest', 'completed_first', 'incomplete_first'
-     * @returns {Array} Array of tasks with attached daily record info
+     * Search filter by Keyword matching title, description, or category
      */
-    getTasksForDashboard(dateStr, searchKeyword = '', statusFilter = 'all', sortBy = 'default') {
+    searchTasks(tasks, keyword) {
+        if (!keyword || !keyword.trim()) return tasks;
+        const q = keyword.trim().toLowerCase();
+        return tasks.filter(t => 
+            t.title.toLowerCase().includes(q) ||
+            (t.description && t.description.toLowerCase().includes(q)) ||
+            (t.category && t.category.toLowerCase().includes(q))
+        );
+    },
+
+    /**
+     * Filter by completion status ('all', 'completed', 'incomplete')
+     */
+    filterByStatus(tasks, statusFilter) {
+        if (!statusFilter || statusFilter === 'all') return tasks;
+        if (statusFilter === 'completed') {
+            return tasks.filter(t => t.status === 'completed');
+        }
+        if (statusFilter === 'incomplete') {
+            return tasks.filter(t => t.status === 'not_completed');
+        }
+        return tasks;
+    },
+
+    /**
+     * Filter by priority ('all', 'high', 'medium', 'low')
+     */
+    filterByPriority(tasks, priorityFilter) {
+        if (!priorityFilter || priorityFilter === 'all') return tasks;
+        const p = priorityFilter.toLowerCase();
+        return tasks.filter(t => t.priority === p);
+    },
+
+    /**
+     * Filter by Category ('all', 'Study', 'Work', etc.)
+     */
+    filterByCategory(tasks, categoryFilter) {
+        if (!categoryFilter || categoryFilter === 'all') return tasks;
+        const c = categoryFilter.toLowerCase();
+        return tasks.filter(t => t.category.toLowerCase() === c);
+    },
+
+    /**
+     * Sort tasks by criterion
+     */
+    sortTasks(tasks, sortBy) {
+        const priorityRank = { high: 3, medium: 2, low: 1 };
+        const sorted = [...tasks];
+
+        sorted.sort((a, b) => {
+            if (sortBy === 'priority_high') {
+                const diff = (priorityRank[b.priority] || 2) - (priorityRank[a.priority] || 2);
+                return diff !== 0 ? diff : a.title.localeCompare(b.title);
+            }
+            if (sortBy === 'priority_low') {
+                const diff = (priorityRank[a.priority] || 2) - (priorityRank[b.priority] || 2);
+                return diff !== 0 ? diff : a.title.localeCompare(b.title);
+            }
+            if (sortBy === 'alphabetical') {
+                return a.title.localeCompare(b.title);
+            }
+            if (sortBy === 'completed_first') {
+                if (a.status === b.status) return a.title.localeCompare(b.title);
+                return a.status === 'completed' ? -1 : 1;
+            }
+            if (sortBy === 'incomplete_first') {
+                if (a.status === b.status) return a.title.localeCompare(b.title);
+                return a.status === 'not_completed' ? -1 : 1;
+            }
+            if (sortBy === 'oldest') {
+                return a.createdAt.localeCompare(b.createdAt);
+            }
+            // Default: Newest first
+            return b.createdAt.localeCompare(a.createdAt);
+        });
+
+        return sorted;
+    },
+
+    /**
+     * Get active tasks for dashboard combined with daily records and filtered/sorted
+     */
+    getFilteredAndSortedTasks(dateStr, searchKeyword = '', statusFilter = 'all', priorityFilter = 'all', categoryFilter = 'all', sortBy = 'default') {
         const tasks = Storage.getTasks();
         const records = Storage.getDailyRecords();
 
-        // Filter: active tasks created on or before dateStr
-        let availableTasks = tasks.filter(task => {
-            return task.active && task.createdAt <= dateStr;
-        });
+        // 1. Base tasks created on or before dateStr & active
+        const availableTasks = tasks.filter(task => task.active && task.createdAt <= dateStr);
 
-        // Map daily record onto each task object
+        // 2. Attach daily record for dateStr
         let combined = availableTasks.map(task => {
             const record = records.find(r => r.taskId === task.id && r.date === dateStr);
             return {
@@ -129,47 +205,90 @@ const TaskManager = {
             };
         });
 
-        // Search Filter
-        if (searchKeyword && searchKeyword.trim()) {
-            const query = searchKeyword.trim().toLowerCase();
-            combined = combined.filter(t => 
-                t.title.toLowerCase().includes(query) || 
-                (t.description && t.description.toLowerCase().includes(query))
-            );
-        }
+        // 3. Sequential Filtering Pipeline (Section 24)
+        combined = this.searchTasks(combined, searchKeyword);
+        combined = this.filterByStatus(combined, statusFilter);
+        combined = this.filterByPriority(combined, priorityFilter);
+        combined = this.filterByCategory(combined, categoryFilter);
 
-        // Status Filter
-        if (statusFilter === 'completed') {
-            combined = combined.filter(t => t.status === 'completed');
-        } else if (statusFilter === 'incomplete') {
-            combined = combined.filter(t => t.status === 'not_completed');
-        }
-
-        // Sorting
-        combined.sort((a, b) => {
-            if (sortBy === 'completed_first') {
-                if (a.status === b.status) return a.title.localeCompare(b.title);
-                return a.status === 'completed' ? -1 : 1;
-            } else if (sortBy === 'incomplete_first') {
-                if (a.status === b.status) return a.title.localeCompare(b.title);
-                return a.status === 'not_completed' ? -1 : 1;
-            } else if (sortBy === 'oldest') {
-                return a.createdAt.localeCompare(b.createdAt);
-            } else if (sortBy === 'newest') {
-                return b.createdAt.localeCompare(a.createdAt);
-            } else {
-                // Default: newest first
-                return b.createdAt.localeCompare(a.createdAt);
-            }
-        });
+        // 4. Sorting
+        combined = this.sortTasks(combined, sortBy);
 
         return combined;
     },
 
     /**
+     * Get counts for Status filters for active tasks today
+     */
+    getStatusCounts(dateStr) {
+        const tasks = Storage.getTasks().filter(t => t.active && t.createdAt <= dateStr);
+        const records = Storage.getDailyRecords();
+
+        let completed = 0;
+        tasks.forEach(t => {
+            const r = records.find(rec => rec.taskId === t.id && rec.date === dateStr);
+            if (r && r.status === 'completed') completed++;
+        });
+
+        return {
+            all: tasks.length,
+            completed: completed,
+            incomplete: tasks.length - completed
+        };
+    },
+
+    /**
+     * Get counts for Priority filters for active tasks today
+     */
+    getPriorityCounts(dateStr) {
+        const tasks = Storage.getTasks().filter(t => t.active && t.createdAt <= dateStr);
+        const counts = { high: 0, medium: 0, low: 0 };
+        tasks.forEach(t => {
+            const p = (t.priority || 'medium').toLowerCase();
+            if (counts[p] !== undefined) counts[p]++;
+        });
+        return counts;
+    },
+
+    /**
+     * Get counts for Category filters for active tasks today
+     */
+    getCategorySummary(dateStr) {
+        const tasks = Storage.getTasks().filter(t => t.active && t.createdAt <= dateStr);
+        const summary = {};
+        tasks.forEach(t => {
+            const cat = t.category || 'General';
+            summary[cat] = (summary[cat] || 0) + 1;
+        });
+        return summary;
+    },
+
+    /**
+     * Get single task's complete historical daily records for Task History Modal
+     */
+    getTaskHistory(taskId) {
+        const tasks = Storage.getTasks();
+        const task = tasks.find(t => t.id === taskId);
+        if (!task) return null;
+
+        const records = Storage.getDailyRecords().filter(r => r.taskId === taskId);
+        records.sort((a, b) => b.date.localeCompare(a.date));
+
+        const completedCount = records.filter(r => r.status === 'completed').length;
+        const totalRecords = records.length;
+        const completionRate = totalRecords > 0 ? Math.round((completedCount / totalRecords) * 100) : 0;
+
+        return {
+            task,
+            records,
+            totalRecords,
+            completedCount,
+            completionRate
+        };
+    },
+
+    /**
      * Calculate progress metrics for a given date
-     * @param {string} dateStr Date YYYY-MM-DD
-     * @returns {Object} { total, completed, remaining, percentage }
      */
     getProgressForDate(dateStr) {
         const tasks = Storage.getTasks();
