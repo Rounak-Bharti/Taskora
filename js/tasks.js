@@ -1,21 +1,83 @@
 /**
- * Tasks Module - Handles Task Creation, Editing, Soft Deletion, Status Toggling, Notes,
- * Advanced Multi-Criteria Filtering, Priority Sorting, and Task History Inspection
+ * Tasks Module - Handles Task Management, Scheduling, Reminders, Filtering & Date Evaluation
  */
 
 const TaskManager = {
     /**
-     * Create a new permanent task
-     * @param {string} title Task Title (required)
-     * @param {string} description Task Description (optional)
-     * @param {string} category Task Category (default 'General')
-     * @param {string} priority Task Priority ('low' | 'medium' | 'high')
-     * @param {string} dateStr Creation date YYYY-MM-DD
-     * @returns {Object} New task object
+     * Check if a task is scheduled to appear on a specific calendar date (Section 24)
+     * @param {Object} task Task object
+     * @param {string} dateStr Calendar date YYYY-MM-DD
+     * @returns {boolean}
      */
-    createTask(title, description = '', category = 'General', priority = 'medium', dateStr) {
+    isTaskScheduledForDate(task, dateStr) {
+        if (!task || !task.active) return false;
+
+        const schedule = task.schedule || { type: 'daily', days: [], startDate: task.createdAt, endDate: null };
+        const startDate = schedule.startDate || task.createdAt;
+
+        // 1. Start Date Check: Task must not appear before start date (Section 8)
+        if (dateStr < startDate) {
+            return false;
+        }
+
+        // 2. End Date Check: Task must not appear after end date if specified (Section 9)
+        if (schedule.endDate && dateStr > schedule.endDate) {
+            return false;
+        }
+
+        const type = schedule.type || 'daily';
+
+        // 3. Schedule Type Evaluation (Section 4, 5, 6, 7)
+        if (type === 'daily') {
+            return true;
+        }
+
+        if (type === 'one_time') {
+            return dateStr === startDate;
+        }
+
+        if (type === 'weekly' || type === 'custom') {
+            const [y, m, d] = dateStr.split('-').map(Number);
+            const dateObj = new Date(y, m - 1, d);
+            const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            const dayName = dayNames[dateObj.getDay()];
+
+            return Array.isArray(schedule.days) && schedule.days.includes(dayName);
+        }
+
+        return true;
+    },
+
+    /**
+     * Create a new permanent task with schedule and reminder parameters
+     */
+    createTask(title, description = '', category = 'General', priority = 'medium', scheduleObj = null, reminderObj = null, dateStr) {
         if (!title || !title.trim()) {
             throw new Error('Task title is required');
+        }
+
+        const defaultSchedule = {
+            type: 'daily',
+            days: [],
+            startDate: dateStr,
+            endDate: null
+        };
+
+        const defaultReminder = {
+            enabled: false,
+            time: '18:00'
+        };
+
+        const finalSchedule = scheduleObj ? { ...defaultSchedule, ...scheduleObj } : defaultSchedule;
+        const finalReminder = reminderObj ? { ...defaultReminder, ...reminderObj } : defaultReminder;
+
+        // Validations (Section 33)
+        if (finalSchedule.endDate && finalSchedule.endDate < finalSchedule.startDate) {
+            throw new Error('End date cannot be before the start date.');
+        }
+
+        if ((finalSchedule.type === 'weekly' || finalSchedule.type === 'custom') && (!finalSchedule.days || finalSchedule.days.length === 0)) {
+            throw new Error('Please select at least one weekday for the schedule.');
         }
 
         const tasks = Storage.getTasks();
@@ -26,23 +88,27 @@ const TaskManager = {
             category: category ? category.trim() : 'General',
             priority: (priority && ['low', 'medium', 'high'].includes(priority.toLowerCase())) ? priority.toLowerCase() : 'medium',
             createdAt: dateStr,
-            active: true
+            active: true,
+            schedule: finalSchedule,
+            reminder: finalReminder
         };
 
         tasks.push(newTask);
         Storage.saveTasks(tasks);
 
-        // Initialize daily record for creation date
-        Storage.saveRecord(newTask.id, dateStr, 'not_completed', '');
+        // Initialize daily record for creation date if scheduled today
+        if (this.isTaskScheduledForDate(newTask, dateStr)) {
+            Storage.saveRecord(newTask.id, dateStr, 'not_completed', '');
+        }
 
         return newTask;
     },
 
     /**
-     * Edit an existing task's title, description, category, and priority
-     * Preserves task ID, creation date, active state, and historical records (Rule 18)
+     * Edit an existing task's title, description, category, priority, schedule, and reminder
+     * Preserves task ID, creation date, active state, and historical records (Section 22 & 23)
      */
-    editTask(taskId, title, description = '', category = 'General', priority = 'medium') {
+    editTask(taskId, title, description = '', category = 'General', priority = 'medium', scheduleObj = null, reminderObj = null) {
         if (!title || !title.trim()) {
             throw new Error('Task title is required');
         }
@@ -54,10 +120,25 @@ const TaskManager = {
             throw new Error('Task not found');
         }
 
+        const currentTask = tasks[taskIndex];
+        const finalSchedule = scheduleObj ? { ...currentTask.schedule, ...scheduleObj } : currentTask.schedule;
+        const finalReminder = reminderObj ? { ...currentTask.reminder, ...reminderObj } : currentTask.reminder;
+
+        // Validations (Section 33)
+        if (finalSchedule.endDate && finalSchedule.endDate < finalSchedule.startDate) {
+            throw new Error('End date cannot be before the start date.');
+        }
+
+        if ((finalSchedule.type === 'weekly' || finalSchedule.type === 'custom') && (!finalSchedule.days || finalSchedule.days.length === 0)) {
+            throw new Error('Please select at least one weekday for the schedule.');
+        }
+
         tasks[taskIndex].title = title.trim();
         tasks[taskIndex].description = description.trim();
         tasks[taskIndex].category = category ? category.trim() : 'General';
         tasks[taskIndex].priority = (priority && ['low', 'medium', 'high'].includes(priority.toLowerCase())) ? priority.toLowerCase() : 'medium';
+        tasks[taskIndex].schedule = finalSchedule;
+        tasks[taskIndex].reminder = finalReminder;
 
         Storage.saveTasks(tasks);
         return tasks[taskIndex];
@@ -65,7 +146,6 @@ const TaskManager = {
 
     /**
      * Soft delete a task (sets active = false)
-     * Historical records remain preserved.
      */
     deleteTask(taskId) {
         const tasks = Storage.getTasks();
@@ -100,12 +180,69 @@ const TaskManager = {
     },
 
     // ==========================================
-    // MODULAR FILTERING & SORTING PIPELINE
+    // REMINDERS & UPCOMING SCHEDULING WIDGETS
     // ==========================================
 
     /**
-     * Search filter by Keyword matching title, description, or category
+     * Get tasks scheduled for today with enabled reminders (Section 18)
+     * Sorted chronologically by reminder time
      */
+    getTodayReminders(todayStr) {
+        const tasks = Storage.getTasks();
+        const scheduledToday = tasks.filter(t => t.active && this.isTaskScheduledForDate(t, todayStr));
+        const remindersToday = scheduledToday.filter(t => t.reminder && t.reminder.enabled);
+
+        remindersToday.sort((a, b) => (a.reminder.time || '00:00').localeCompare(b.reminder.time || '00:00'));
+
+        return remindersToday;
+    },
+
+    /**
+     * Get upcoming scheduled tasks for the next 7 days (Section 19)
+     */
+    getUpcomingTasks(todayStr, limit = 5) {
+        const tasks = Storage.getTasks().filter(t => t.active);
+        const upcomingList = [];
+
+        const baseDate = new Date(todayStr + 'T00:00:00');
+
+        for (let i = 0; i <= 7; i++) {
+            const d = new Date(baseDate);
+            d.setDate(d.getDate() + i);
+
+            const yyyy = d.getFullYear();
+            const mm = String(d.getMonth() + 1).padStart(2, '0');
+            const dd = String(d.getDate()).padStart(2, '0');
+            const dateStr = `${yyyy}-${mm}-${dd}`;
+
+            let dateLabel = 'Today';
+            if (i === 1) dateLabel = 'Tomorrow';
+            else if (i > 1) {
+                const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+                dateLabel = `${dayNames[d.getDay()]}, ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+            }
+
+            tasks.forEach(t => {
+                if (this.isTaskScheduledForDate(t, dateStr)) {
+                    upcomingList.push({
+                        task: t,
+                        dateStr,
+                        dateLabel,
+                        reminderTime: t.reminder && t.reminder.enabled ? t.reminder.time : null
+                    });
+                }
+            });
+
+            if (upcomingList.length >= limit * 2) break;
+        }
+
+        return upcomingList.slice(0, limit);
+    },
+
+    // ==========================================
+    // FILTERING & SORTING PIPELINE
+    // ==========================================
+
     searchTasks(tasks, keyword) {
         if (!keyword || !keyword.trim()) return tasks;
         const q = keyword.trim().toLowerCase();
@@ -116,9 +253,6 @@ const TaskManager = {
         );
     },
 
-    /**
-     * Filter by completion status ('all', 'completed', 'incomplete')
-     */
     filterByStatus(tasks, statusFilter) {
         if (!statusFilter || statusFilter === 'all') return tasks;
         if (statusFilter === 'completed') {
@@ -130,27 +264,18 @@ const TaskManager = {
         return tasks;
     },
 
-    /**
-     * Filter by priority ('all', 'high', 'medium', 'low')
-     */
     filterByPriority(tasks, priorityFilter) {
         if (!priorityFilter || priorityFilter === 'all') return tasks;
         const p = priorityFilter.toLowerCase();
         return tasks.filter(t => t.priority === p);
     },
 
-    /**
-     * Filter by Category ('all', 'Study', 'Work', etc.)
-     */
     filterByCategory(tasks, categoryFilter) {
         if (!categoryFilter || categoryFilter === 'all') return tasks;
         const c = categoryFilter.toLowerCase();
         return tasks.filter(t => t.category.toLowerCase() === c);
     },
 
-    /**
-     * Sort tasks by criterion
-     */
     sortTasks(tasks, sortBy) {
         const priorityRank = { high: 3, medium: 2, low: 1 };
         const sorted = [...tasks];
@@ -178,7 +303,6 @@ const TaskManager = {
             if (sortBy === 'oldest') {
                 return a.createdAt.localeCompare(b.createdAt);
             }
-            // Default: Newest first
             return b.createdAt.localeCompare(a.createdAt);
         });
 
@@ -186,14 +310,14 @@ const TaskManager = {
     },
 
     /**
-     * Get active tasks for dashboard combined with daily records and filtered/sorted
+     * Get active tasks scheduled for dashboard dateStr (Section 25)
      */
     getFilteredAndSortedTasks(dateStr, searchKeyword = '', statusFilter = 'all', priorityFilter = 'all', categoryFilter = 'all', sortBy = 'default') {
         const tasks = Storage.getTasks();
         const records = Storage.getDailyRecords();
 
-        // 1. Base tasks created on or before dateStr & active
-        const availableTasks = tasks.filter(task => task.active && task.createdAt <= dateStr);
+        // 1. Filter active tasks SCHEDULED for dateStr
+        const availableTasks = tasks.filter(task => task.active && this.isTaskScheduledForDate(task, dateStr));
 
         // 2. Attach daily record for dateStr
         let combined = availableTasks.map(task => {
@@ -205,7 +329,7 @@ const TaskManager = {
             };
         });
 
-        // 3. Sequential Filtering Pipeline (Section 24)
+        // 3. Filtering Pipeline
         combined = this.searchTasks(combined, searchKeyword);
         combined = this.filterByStatus(combined, statusFilter);
         combined = this.filterByPriority(combined, priorityFilter);
@@ -217,11 +341,8 @@ const TaskManager = {
         return combined;
     },
 
-    /**
-     * Get counts for Status filters for active tasks today
-     */
     getStatusCounts(dateStr) {
-        const tasks = Storage.getTasks().filter(t => t.active && t.createdAt <= dateStr);
+        const tasks = Storage.getTasks().filter(t => t.active && this.isTaskScheduledForDate(t, dateStr));
         const records = Storage.getDailyRecords();
 
         let completed = 0;
@@ -237,11 +358,8 @@ const TaskManager = {
         };
     },
 
-    /**
-     * Get counts for Priority filters for active tasks today
-     */
     getPriorityCounts(dateStr) {
-        const tasks = Storage.getTasks().filter(t => t.active && t.createdAt <= dateStr);
+        const tasks = Storage.getTasks().filter(t => t.active && this.isTaskScheduledForDate(t, dateStr));
         const counts = { high: 0, medium: 0, low: 0 };
         tasks.forEach(t => {
             const p = (t.priority || 'medium').toLowerCase();
@@ -250,11 +368,8 @@ const TaskManager = {
         return counts;
     },
 
-    /**
-     * Get counts for Category filters for active tasks today
-     */
     getCategorySummary(dateStr) {
-        const tasks = Storage.getTasks().filter(t => t.active && t.createdAt <= dateStr);
+        const tasks = Storage.getTasks().filter(t => t.active && this.isTaskScheduledForDate(t, dateStr));
         const summary = {};
         tasks.forEach(t => {
             const cat = t.category || 'General';
@@ -263,9 +378,6 @@ const TaskManager = {
         return summary;
     },
 
-    /**
-     * Get single task's complete historical daily records for Task History Modal
-     */
     getTaskHistory(taskId) {
         const tasks = Storage.getTasks();
         const task = tasks.find(t => t.id === taskId);
@@ -288,13 +400,13 @@ const TaskManager = {
     },
 
     /**
-     * Calculate progress metrics for a given date
+     * Calculate progress metrics for a given date based ONLY on scheduled tasks (Section 26)
      */
     getProgressForDate(dateStr) {
         const tasks = Storage.getTasks();
         const records = Storage.getDailyRecords();
 
-        const activeTasksOnDate = tasks.filter(t => t.active && t.createdAt <= dateStr);
+        const activeTasksOnDate = tasks.filter(t => t.active && this.isTaskScheduledForDate(t, dateStr));
         const total = activeTasksOnDate.length;
 
         if (total === 0) {

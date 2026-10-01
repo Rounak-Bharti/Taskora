@@ -1,5 +1,5 @@
 /**
- * App Module - Central Coordinator for UI, Events, Navigation, Advanced Task Management, Modals & Toasts
+ * App Module - Central Coordinator for UI, Events, Navigation, Scheduling, Reminders, Modals & Toasts
  */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -19,6 +19,10 @@ const App = {
     editingTaskId: null,
     deletingTaskId: null,
     viewingHistoryTaskId: null,
+    viewingDetailsTaskId: null,
+
+    // Periodic reminder checker handle
+    reminderTimerId: null,
 
     init() {
         // 1. Detect local date YYYY-MM-DD
@@ -42,7 +46,10 @@ const App = {
         // 7. Bind all UI event listeners
         this.bindEvents();
 
-        // 8. Initial View render
+        // 8. Start Background Reminder Checker (Section 16)
+        this.startReminderChecker();
+
+        // 9. Initial View render
         this.switchView('dashboard');
     },
 
@@ -55,6 +62,27 @@ const App = {
         const mm = String(now.getMonth() + 1).padStart(2, '0');
         const dd = String(now.getDate()).padStart(2, '0');
         return `${yyyy}-${mm}-${dd}`;
+    },
+
+    /**
+     * Get current local time as HH:MM string (24h format)
+     */
+    getCurrentTime() {
+        const now = new Date();
+        const hh = String(now.getHours()).padStart(2, '0');
+        const mm = String(now.getMinutes()).padStart(2, '0');
+        return `${hh}:${mm}`;
+    },
+
+    /**
+     * Format 24h time string HH:MM to 12h format (e.g. "18:00" -> "6:00 PM")
+     */
+    formatTime12h(time24) {
+        if (!time24) return '';
+        const [h, m] = time24.split(':').map(Number);
+        const ampm = h >= 12 ? 'PM' : 'AM';
+        const h12 = h % 12 || 12;
+        return `${h12}:${String(m).padStart(2, '0')} ${ampm}`;
     },
 
     /**
@@ -102,6 +130,8 @@ const App = {
                 themeIcon.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>`;
             }
         }
+
+        this.updateNotificationStatusUI();
     },
 
     /**
@@ -131,24 +161,21 @@ const App = {
     },
 
     /**
-     * Populate Category Dropdowns dynamically (Predefined + Custom categories)
+     * Populate Category Dropdowns dynamically
      */
     populateCategoryDropdowns() {
         const categories = Storage.getCategories();
 
-        // 1. Add Task Category select
         const addSelect = document.getElementById('add-task-category');
         if (addSelect) {
             addSelect.innerHTML = categories.map(c => `<option value="${c}">${c}</option>`).join('');
         }
 
-        // 2. Edit Task Category select
         const editSelect = document.getElementById('edit-task-category');
         if (editSelect) {
             editSelect.innerHTML = categories.map(c => `<option value="${c}">${c}</option>`).join('');
         }
 
-        // 3. Filter Category select
         const filterSelect = document.getElementById('filter-category-select');
         if (filterSelect) {
             const currentVal = this.categoryFilter;
@@ -158,13 +185,106 @@ const App = {
         }
     },
 
+    // ==========================================
+    // REMINDER SYSTEM & NOTIFICATIONS (SECTION 13, 14, 16, 17)
+    // ==========================================
+
+    /**
+     * Start periodic reminder checker (every 30s)
+     */
+    startReminderChecker() {
+        if (this.reminderTimerId) clearInterval(this.reminderTimerId);
+
+        // Run immediate check
+        this.checkReminders();
+
+        // Interval check
+        this.reminderTimerId = setInterval(() => {
+            this.checkReminders();
+        }, 30000);
+    },
+
+    /**
+     * Periodic Reminder Checker Logic
+     */
+    checkReminders() {
+        const currentTime = this.getCurrentTime();
+        const scheduledToday = TaskManager.getTodayReminders(this.todayDateStr);
+
+        scheduledToday.forEach(t => {
+            if (t.reminder && t.reminder.enabled && t.reminder.time === currentTime) {
+                const triggerKey = `${t.id}_${this.todayDateStr}_${t.reminder.time}`;
+
+                if (!Storage.hasReminderBeenTriggered(triggerKey)) {
+                    Storage.markReminderTriggered(triggerKey);
+
+                    // Show Toast
+                    this.showToast(`⏰ Reminder: ${t.title} (${this.formatTime12h(t.reminder.time)})`, 'warning');
+
+                    // Show Browser Native Notification if granted
+                    if ('Notification' in window && Notification.permission === 'granted') {
+                        try {
+                            new Notification('DailyTrack Reminder', {
+                                body: `Time to complete: ${t.title}`,
+                                icon: 'images/icon.png'
+                            });
+                        } catch (err) {
+                            console.error('Notification error:', err);
+                        }
+                    }
+                }
+            }
+        });
+    },
+
+    /**
+     * Request browser notification permission (Section 13 & 14)
+     */
+    requestNotificationPermission() {
+        if (!('Notification' in window)) {
+            this.showToast('Your browser does not support native notifications.', 'warning');
+            this.updateNotificationStatusUI();
+            return;
+        }
+
+        Notification.requestPermission().then(permission => {
+            this.updateNotificationStatusUI();
+            if (permission === 'granted') {
+                this.showToast('✓ Browser notifications enabled!', 'success');
+            } else if (permission === 'denied') {
+                this.showToast('Notifications blocked in browser settings.', 'warning');
+            }
+        });
+    },
+
+    /**
+     * Update Notification Status UI label
+     */
+    updateNotificationStatusUI() {
+        const statusEl = document.getElementById('notification-status-label');
+        if (!statusEl) return;
+
+        if (!('Notification' in window)) {
+            statusEl.textContent = 'Unsupported in browser';
+            statusEl.className = 'status-badge pending';
+        } else if (Notification.permission === 'granted') {
+            statusEl.textContent = '✓ Notifications Granted';
+            statusEl.className = 'status-badge completed';
+        } else if (Notification.permission === 'denied') {
+            statusEl.textContent = 'Blocked in settings';
+            statusEl.className = 'status-badge danger';
+        } else {
+            statusEl.textContent = 'Not Requested';
+            statusEl.className = 'status-badge pending';
+        }
+    },
+
     /**
      * View Switcher Navigation
      */
     switchView(viewName) {
         this.currentView = viewName;
 
-        // Navigation tab active state
         document.querySelectorAll('.nav-link').forEach(link => {
             if (link.getAttribute('data-view') === viewName) {
                 link.classList.add('active');
@@ -173,7 +293,6 @@ const App = {
             }
         });
 
-        // Toggle view containers
         document.querySelectorAll('.view-section').forEach(sec => {
             sec.style.display = 'none';
         });
@@ -183,7 +302,6 @@ const App = {
             targetSec.style.display = 'block';
         }
 
-        // Render target view content
         if (viewName === 'dashboard') {
             this.renderDashboard();
         } else if (viewName === 'history') {
@@ -209,6 +327,11 @@ const App = {
         // Theme Toggle
         document.getElementById('theme-toggle-btn')?.addEventListener('click', () => {
             this.toggleTheme();
+        });
+
+        // Notification Permission Button
+        document.getElementById('btn-request-notifications')?.addEventListener('click', () => {
+            this.requestNotificationPermission();
         });
 
         // Add Task Modal triggers
@@ -256,6 +379,44 @@ const App = {
             if (!e.target.closest('.task-menu-container')) {
                 this.closeAllDropdownMenus();
             }
+        });
+
+        // Add Task Schedule Type change event
+        document.getElementById('add-schedule-type')?.addEventListener('change', (e) => {
+            this.toggleScheduleTypeInputs('add', e.target.value);
+        });
+
+        // Edit Task Schedule Type change event
+        document.getElementById('edit-schedule-type')?.addEventListener('change', (e) => {
+            this.toggleScheduleTypeInputs('edit', e.target.value);
+        });
+
+        // Add Task Reminder toggle event
+        document.getElementById('add-reminder-enabled')?.addEventListener('change', (e) => {
+            const timeWrapper = document.getElementById('add-reminder-time-group');
+            if (timeWrapper) timeWrapper.style.display = e.target.checked ? 'block' : 'none';
+            if (e.target.checked) this.requestNotificationPermission();
+        });
+
+        // Edit Task Reminder toggle event
+        document.getElementById('edit-reminder-enabled')?.addEventListener('change', (e) => {
+            const timeWrapper = document.getElementById('edit-reminder-time-group');
+            if (timeWrapper) timeWrapper.style.display = e.target.checked ? 'block' : 'none';
+            if (e.target.checked) this.requestNotificationPermission();
+        });
+
+        // Weekday Button Toggles (Add Modal)
+        document.querySelectorAll('#add-schedule-days-container .btn-day-chip').forEach(btn => {
+            btn.addEventListener('click', () => {
+                btn.classList.toggle('active');
+            });
+        });
+
+        // Weekday Button Toggles (Edit Modal)
+        document.querySelectorAll('#edit-schedule-days-container .btn-day-chip').forEach(btn => {
+            btn.addEventListener('click', () => {
+                btn.classList.toggle('active');
+            });
         });
 
         // Form Submit: Add Task
@@ -337,7 +498,7 @@ const App = {
     },
 
     /**
-     * Clear all search, filter, and sort criteria (Section 14)
+     * Clear all search, filter, and sort criteria
      */
     clearFilters() {
         this.searchQuery = '';
@@ -363,6 +524,21 @@ const App = {
 
         this.renderDashboard();
         this.showToast('All search & filters reset', 'info');
+    },
+
+    /**
+     * Toggle schedule inputs in Add/Edit modal based on type
+     */
+    toggleScheduleTypeInputs(prefix, type) {
+        const daysGroup = document.getElementById(`${prefix}-schedule-days-group`);
+        const startDateGroup = document.getElementById(`${prefix}-start-date-group`);
+        const endDateGroup = document.getElementById(`${prefix}-end-date-group`);
+
+        if (daysGroup) daysGroup.style.display = (type === 'weekly' || type === 'custom') ? 'block' : 'none';
+        if (startDateGroup) {
+            const label = startDateGroup.querySelector('.form-label');
+            if (label) label.textContent = (type === 'one_time') ? 'Task Date *' : 'Start Date *';
+        }
     },
 
     /**
@@ -412,12 +588,14 @@ const App = {
         const availableCount = TaskManager.getStatusCounts(this.todayDateStr).all;
         const resultCountEl = document.getElementById('filter-result-count');
         if (resultCountEl) {
-            resultCountEl.textContent = `Showing ${tasks.length} of ${availableCount} tasks`;
+            resultCountEl.textContent = `Showing ${tasks.length} of ${availableCount} scheduled tasks`;
         }
 
-        // Render Summary Widgets (Category & Priority)
+        // Render Summary Widgets (Category, Priority, Reminders, Upcoming)
         this.renderCategorySummaryWidget();
         this.renderPrioritySummaryWidget();
+        this.renderTodayRemindersWidget();
+        this.renderUpcomingTasksWidget();
 
         const container = document.getElementById('tasks-container');
         const emptyState = document.getElementById('tasks-empty-state');
@@ -435,8 +613,8 @@ const App = {
                     if (emptyTitle) emptyTitle.textContent = 'No matching tasks found';
                     if (emptyText) emptyText.textContent = 'Try adjusting or clearing your search and filter criteria.';
                 } else {
-                    if (emptyTitle) emptyTitle.textContent = 'No tasks yet';
-                    if (emptyText) emptyText.textContent = 'Start building your daily routine by adding your first task.';
+                    if (emptyTitle) emptyTitle.textContent = 'No tasks scheduled for today';
+                    if (emptyText) emptyText.textContent = 'You have no active tasks scheduled for today.';
                 }
             }
             return;
@@ -467,7 +645,7 @@ const App = {
         }
 
         const pillsHtml = categories.map(cat => `
-            <span class="widget-pill category-pill-sm" data-category="${cat}">
+            <span class="widget-pill category-pill-sm">
                 <strong>${this.escapeHtml(cat)}</strong> (${summary[cat]})
             </span>
         `).join('');
@@ -498,7 +676,88 @@ const App = {
     },
 
     /**
-     * Generate HTML for a single task card (Redesigned per Section 5, 6, 19)
+     * Render Today's Reminders Widget (Section 18)
+     */
+    renderTodayRemindersWidget() {
+        const container = document.getElementById('dashboard-today-reminders');
+        if (!container) return;
+
+        const reminders = TaskManager.getTodayReminders(this.todayDateStr);
+
+        if (reminders.length === 0) {
+            container.innerHTML = `
+                <div class="widget-header-title">⏰ Today's Reminders</div>
+                <p class="empty-widget-text">No reminders scheduled for today.</p>
+            `;
+            return;
+        }
+
+        const listHtml = reminders.map(t => `
+            <div class="reminder-item-row">
+                <span class="reminder-time-tag">${this.formatTime12h(t.reminder.time)}</span>
+                <span class="reminder-task-title">${this.escapeHtml(t.title)}</span>
+            </div>
+        `).join('');
+
+        container.innerHTML = `
+            <div class="widget-header-title">⏰ Today's Reminders</div>
+            <div class="reminders-list-grid">${listHtml}</div>
+        `;
+    },
+
+    /**
+     * Render Upcoming Tasks Widget (Section 19)
+     */
+    renderUpcomingTasksWidget() {
+        const container = document.getElementById('dashboard-upcoming-tasks');
+        if (!container) return;
+
+        const upcoming = TaskManager.getUpcomingTasks(this.todayDateStr, 5);
+
+        if (upcoming.length === 0) {
+            container.innerHTML = `
+                <div class="widget-header-title">📅 Upcoming Tasks</div>
+                <p class="empty-widget-text">No upcoming tasks scheduled.</p>
+            `;
+            return;
+        }
+
+        const listHtml = upcoming.map(item => `
+            <div class="upcoming-item-row">
+                <div class="upcoming-meta">
+                    <span class="upcoming-date-badge">${item.dateLabel}</span>
+                    ${item.reminderTime ? `<span class="upcoming-time-tag">⏰ ${this.formatTime12h(item.reminderTime)}</span>` : ''}
+                </div>
+                <span class="upcoming-task-title">${this.escapeHtml(item.task.title)}</span>
+            </div>
+        `).join('');
+
+        container.innerHTML = `
+            <div class="widget-header-title">📅 Upcoming Tasks</div>
+            <div class="upcoming-list-grid">${listHtml}</div>
+        `;
+    },
+
+    /**
+     * Generate Compact Schedule Badge string for task cards (Section 20 & 29)
+     */
+    getScheduleBadgeText(schedule) {
+        if (!schedule) return 'Daily';
+        const type = schedule.type || 'daily';
+
+        if (type === 'daily') return 'Daily';
+        if (type === 'one_time') return `One Time • ${schedule.startDate}`;
+        if (type === 'weekly' || type === 'custom') {
+            if (Array.isArray(schedule.days) && schedule.days.length > 0) {
+                return schedule.days.join(' • ');
+            }
+            return 'Custom Days';
+        }
+        return 'Daily';
+    },
+
+    /**
+     * Generate HTML for a single task card
      */
     createTaskCardHtml(task) {
         const isCompleted = task.status === 'completed';
@@ -507,7 +766,9 @@ const App = {
 
         const priorityLabel = (task.priority || 'medium').toUpperCase();
         const categoryLabel = task.category || 'General';
-        const createdDateFormatted = this.formatFullDate(task.createdAt);
+        const scheduleBadge = this.getScheduleBadgeText(task.schedule);
+        const hasReminder = task.reminder && task.reminder.enabled;
+        const reminderTimeStr = hasReminder ? this.formatTime12h(task.reminder.time) : '';
 
         return `
             <div class="${cardClass}" data-task-id="${task.id}">
@@ -531,6 +792,9 @@ const App = {
                             ⋮
                         </button>
                         <div class="task-dropdown-menu" id="menu-${task.id}" style="display: none;">
+                            <button type="button" class="dropdown-item btn-view-details" data-task-id="${task.id}">
+                                📋 Task Details
+                            </button>
                             <button type="button" class="dropdown-item btn-edit-task" data-task-id="${task.id}">
                                 ✏️ Edit Task
                             </button>
@@ -545,10 +809,12 @@ const App = {
                     </div>
                 </div>
 
-                <!-- Badges Row (Category & Priority) -->
+                <!-- Badges Row (Schedule, Category, Priority, Reminder) -->
                 <div class="task-badges-row">
+                    <span class="badge schedule-badge" title="Schedule">🔄 ${this.escapeHtml(scheduleBadge)}</span>
                     <span class="badge category-badge">📁 ${this.escapeHtml(categoryLabel)}</span>
                     <span class="badge priority-badge ${task.priority}">${priorityLabel} PRIORITY</span>
+                    ${hasReminder ? `<span class="badge reminder-badge" title="Reminder Time">⏰ ${reminderTimeStr}</span>` : ''}
                 </div>
 
                 <!-- Daily Note Box -->
@@ -572,7 +838,6 @@ const App = {
                 <div class="task-card-footer">
                     <div class="footer-left">
                         <span class="status-badge ${isCompleted ? 'completed' : 'pending'}">${statusBadgeText}</span>
-                        <span class="created-date-tag">Created ${createdDateFormatted}</span>
                     </div>
                     <button type="button" class="btn btn-sm ${isCompleted ? 'btn-secondary' : 'btn-primary'} btn-toggle-status-main" data-task-id="${task.id}">
                         ${isCompleted ? 'Mark Incomplete' : 'Mark Complete'}
@@ -611,6 +876,16 @@ const App = {
                 if (menu && !isVisible) {
                     menu.style.display = 'block';
                 }
+            });
+        });
+
+        // View Task Details Button
+        container.querySelectorAll('.btn-view-details').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.closeAllDropdownMenus();
+                const taskId = btn.getAttribute('data-task-id');
+                this.openTaskDetailsModal(taskId);
             });
         });
 
@@ -673,12 +948,10 @@ const App = {
 
         if (!calContainer || !detailContainer) return;
 
-        // Render Calendar
         HistoryManager.renderCalendar(calContainer, this.todayDateStr, (selectedDateStr) => {
             HistoryManager.renderHistoryForDate(detailContainer, selectedDateStr, this.todayDateStr);
         });
 
-        // Render initial details for selected date
         const initialDate = HistoryManager.selectedDate || this.todayDateStr;
         HistoryManager.renderHistoryForDate(detailContainer, initialDate, this.todayDateStr);
     },
@@ -704,9 +977,20 @@ const App = {
         const form = document.getElementById('form-add-task');
         if (form) form.reset();
 
-        // Default priority radio medium checked
+        // Defaults
         const mediumRadio = form?.querySelector('input[name="add-priority"][value="medium"]');
         if (mediumRadio) mediumRadio.checked = true;
+
+        const startDateInput = document.getElementById('add-schedule-start-date');
+        if (startDateInput) startDateInput.value = this.todayDateStr;
+
+        this.toggleScheduleTypeInputs('add', 'daily');
+        document.querySelectorAll('#add-schedule-days-container .btn-day-chip').forEach(b => b.classList.remove('active'));
+
+        const reminderToggle = document.getElementById('add-reminder-enabled');
+        if (reminderToggle) reminderToggle.checked = false;
+        const timeWrapper = document.getElementById('add-reminder-time-group');
+        if (timeWrapper) timeWrapper.style.display = 'none';
 
         if (modal) modal.classList.add('active');
         document.getElementById('add-task-title')?.focus();
@@ -722,15 +1006,44 @@ const App = {
 
         this.editingTaskId = taskId;
         const modal = document.getElementById('modal-edit-task');
+        
         const titleInput = document.getElementById('edit-task-title');
         const descInput = document.getElementById('edit-task-desc');
         const catSelect = document.getElementById('edit-task-category');
         const prioSelect = document.getElementById('edit-task-priority');
+        const typeSelect = document.getElementById('edit-schedule-type');
+        const startDateInput = document.getElementById('edit-schedule-start-date');
+        const endDateInput = document.getElementById('edit-schedule-end-date');
+        const reminderToggle = document.getElementById('edit-reminder-enabled');
+        const reminderTimeInput = document.getElementById('edit-reminder-time');
 
         if (titleInput) titleInput.value = task.title;
         if (descInput) descInput.value = task.description || '';
         if (catSelect) catSelect.value = task.category || 'General';
         if (prioSelect) prioSelect.value = (task.priority || 'medium').toLowerCase();
+
+        const sch = task.schedule || { type: 'daily', days: [], startDate: task.createdAt, endDate: null };
+        if (typeSelect) typeSelect.value = sch.type || 'daily';
+        if (startDateInput) startDateInput.value = sch.startDate || task.createdAt;
+        if (endDateInput) endDateInput.value = sch.endDate || '';
+
+        this.toggleScheduleTypeInputs('edit', sch.type || 'daily');
+
+        // Set Weekday chips active
+        document.querySelectorAll('#edit-schedule-days-container .btn-day-chip').forEach(btn => {
+            const day = btn.getAttribute('data-day');
+            if (sch.days && sch.days.includes(day)) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+
+        const rem = task.reminder || { enabled: false, time: '18:00' };
+        if (reminderToggle) reminderToggle.checked = rem.enabled;
+        if (reminderTimeInput) reminderTimeInput.value = rem.time || '18:00';
+        const timeWrapper = document.getElementById('edit-reminder-time-group');
+        if (timeWrapper) timeWrapper.style.display = rem.enabled ? 'block' : 'none';
 
         if (modal) modal.classList.add('active');
         titleInput?.focus();
@@ -742,6 +1055,64 @@ const App = {
         if (form) form.reset();
         if (modal) modal.classList.add('active');
         document.getElementById('custom-category-name')?.focus();
+    },
+
+    openTaskDetailsModal(taskId) {
+        this.closeModals();
+        const tasks = Storage.getTasks();
+        const task = tasks.find(t => t.id === taskId);
+        if (!task) return;
+
+        this.viewingDetailsTaskId = taskId;
+        const modal = document.getElementById('modal-task-details');
+        const body = document.getElementById('task-details-body');
+
+        const sch = task.schedule || { type: 'daily', days: [], startDate: task.createdAt, endDate: null };
+        const rem = task.reminder || { enabled: false, time: '18:00' };
+        const scheduleLabel = this.getScheduleBadgeText(sch);
+
+        if (body) {
+            body.innerHTML = `
+                <div class="task-details-grid">
+                    <div class="details-row">
+                        <span class="details-label">Title</span>
+                        <span class="details-value font-bold">${this.escapeHtml(task.title)}</span>
+                    </div>
+                    ${task.description ? `
+                        <div class="details-row">
+                            <span class="details-label">Description</span>
+                            <span class="details-value">${this.escapeHtml(task.description)}</span>
+                        </div>
+                    ` : ''}
+                    <div class="details-row">
+                        <span class="details-label">Category</span>
+                        <span class="details-value">📁 ${this.escapeHtml(task.category || 'General')}</span>
+                    </div>
+                    <div class="details-row">
+                        <span class="details-label">Priority</span>
+                        <span class="details-value"><span class="badge priority-badge ${task.priority}">${(task.priority || 'medium').toUpperCase()}</span></span>
+                    </div>
+                    <div class="details-row">
+                        <span class="details-label">Schedule Type</span>
+                        <span class="details-value">🔄 ${this.escapeHtml(scheduleLabel)}</span>
+                    </div>
+                    <div class="details-row">
+                        <span class="details-label">Start Date</span>
+                        <span class="details-value">${this.formatFullDate(sch.startDate || task.createdAt)}</span>
+                    </div>
+                    <div class="details-row">
+                        <span class="details-label">End Date</span>
+                        <span class="details-value">${sch.endDate ? this.formatFullDate(sch.endDate) : 'No end date (Continuous)'}</span>
+                    </div>
+                    <div class="details-row">
+                        <span class="details-label">Reminder</span>
+                        <span class="details-value">${rem.enabled ? `⏰ Enabled (${this.formatTime12h(rem.time)})` : 'Disabled'}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        if (modal) modal.classList.add('active');
     },
 
     openTaskHistoryModal(taskId) {
@@ -812,6 +1183,7 @@ const App = {
         this.editingTaskId = null;
         this.deletingTaskId = null;
         this.viewingHistoryTaskId = null;
+        this.viewingDetailsTaskId = null;
     },
 
     handleAddTaskSubmit() {
@@ -820,10 +1192,38 @@ const App = {
         const catSelect = document.getElementById('add-task-category');
         const prioRadio = document.querySelector('input[name="add-priority"]:checked');
 
+        const typeSelect = document.getElementById('add-schedule-type');
+        const startDateInput = document.getElementById('add-schedule-start-date');
+        const endDateInput = document.getElementById('add-schedule-end-date');
+        const reminderToggle = document.getElementById('add-reminder-enabled');
+        const reminderTimeInput = document.getElementById('add-reminder-time');
+
         const title = titleInput?.value.trim();
         const desc = descInput?.value.trim();
         const category = catSelect?.value || 'General';
         const priority = prioRadio?.value || 'medium';
+
+        // Schedule & Reminder objects
+        const scheduleType = typeSelect?.value || 'daily';
+        const startDate = startDateInput?.value || this.todayDateStr;
+        const endDate = endDateInput?.value || null;
+
+        const selectedDays = [];
+        document.querySelectorAll('#add-schedule-days-container .btn-day-chip.active').forEach(b => {
+            selectedDays.push(b.getAttribute('data-day'));
+        });
+
+        const scheduleObj = {
+            type: scheduleType,
+            days: selectedDays,
+            startDate: startDate,
+            endDate: endDate || null
+        };
+
+        const reminderObj = {
+            enabled: Boolean(reminderToggle && reminderToggle.checked),
+            time: reminderTimeInput?.value || '18:00'
+        };
 
         if (!title) {
             this.showToast('Task title is required', 'warning');
@@ -831,10 +1231,10 @@ const App = {
         }
 
         try {
-            TaskManager.createTask(title, desc, category, priority, this.todayDateStr);
+            TaskManager.createTask(title, desc, category, priority, scheduleObj, reminderObj, this.todayDateStr);
             this.closeModals();
             this.renderDashboard();
-            this.showToast('✓ Task added successfully', 'success');
+            this.showToast('✓ Task added successfully with schedule!', 'success');
         } catch (err) {
             this.showToast(err.message || 'Error adding task', 'error');
         }
@@ -848,10 +1248,37 @@ const App = {
         const catSelect = document.getElementById('edit-task-category');
         const prioSelect = document.getElementById('edit-task-priority');
 
+        const typeSelect = document.getElementById('edit-schedule-type');
+        const startDateInput = document.getElementById('edit-schedule-start-date');
+        const endDateInput = document.getElementById('edit-schedule-end-date');
+        const reminderToggle = document.getElementById('edit-reminder-enabled');
+        const reminderTimeInput = document.getElementById('edit-reminder-time');
+
         const title = titleInput?.value.trim();
         const desc = descInput?.value.trim();
         const category = catSelect?.value || 'General';
         const priority = prioSelect?.value || 'medium';
+
+        const scheduleType = typeSelect?.value || 'daily';
+        const startDate = startDateInput?.value || this.todayDateStr;
+        const endDate = endDateInput?.value || null;
+
+        const selectedDays = [];
+        document.querySelectorAll('#edit-schedule-days-container .btn-day-chip.active').forEach(b => {
+            selectedDays.push(b.getAttribute('data-day'));
+        });
+
+        const scheduleObj = {
+            type: scheduleType,
+            days: selectedDays,
+            startDate: startDate,
+            endDate: endDate || null
+        };
+
+        const reminderObj = {
+            enabled: Boolean(reminderToggle && reminderToggle.checked),
+            time: reminderTimeInput?.value || '18:00'
+        };
 
         if (!title) {
             this.showToast('Task title is required', 'warning');
@@ -859,10 +1286,10 @@ const App = {
         }
 
         try {
-            TaskManager.editTask(this.editingTaskId, title, desc, category, priority);
+            TaskManager.editTask(this.editingTaskId, title, desc, category, priority, scheduleObj, reminderObj);
             this.closeModals();
             this.renderDashboard();
-            this.showToast('✓ Task updated successfully', 'success');
+            this.showToast('✓ Task updated successfully!', 'success');
         } catch (err) {
             this.showToast(err.message || 'Error updating task', 'error');
         }
@@ -881,7 +1308,6 @@ const App = {
             Storage.addCategory(name);
             this.populateCategoryDropdowns();
 
-            // Set new category in active selects
             const addSelect = document.getElementById('add-task-category');
             if (addSelect) addSelect.value = name;
 

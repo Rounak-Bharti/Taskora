@@ -2,17 +2,19 @@
  * Storage Module - Manages LocalStorage operations for Daily Task Tracker
  * 
  * Keys:
- * - dailyTaskTracker_tasks: Permanent task objects (with category & priority)
+ * - dailyTaskTracker_tasks: Permanent task objects (with schedule & reminder)
  * - dailyTaskTracker_dailyRecords: Daily tracking records (status & notes per date)
  * - dailyTaskTracker_settings: User preferences & theme settings
  * - dailyTaskTracker_categories: Custom categories list
+ * - dailyTaskTracker_triggeredReminders: Log of triggered reminder keys
  */
 
 const STORAGE_KEYS = {
     TASKS: 'dailyTaskTracker_tasks',
     RECORDS: 'dailyTaskTracker_dailyRecords',
     SETTINGS: 'dailyTaskTracker_settings',
-    CATEGORIES: 'dailyTaskTracker_categories'
+    CATEGORIES: 'dailyTaskTracker_categories',
+    TRIGGERED_REMINDERS: 'dailyTaskTracker_triggeredReminders'
 };
 
 const DEFAULT_CATEGORIES = [
@@ -28,7 +30,7 @@ const DEFAULT_CATEGORIES = [
 
 const Storage = {
     /**
-     * Get all permanent tasks from LocalStorage with defaults for category & priority
+     * Get all permanent tasks from LocalStorage with defaults for schedule & reminder
      * @returns {Array} Array of task objects
      */
     getTasks() {
@@ -37,8 +39,8 @@ const Storage = {
             if (!data) return [];
 
             const tasks = JSON.parse(data);
-            // Upgrade legacy tasks to ensure category and priority exist
             let updated = false;
+
             tasks.forEach(t => {
                 if (!t.category) {
                     t.category = 'General';
@@ -46,6 +48,22 @@ const Storage = {
                 }
                 if (!t.priority) {
                     t.priority = 'medium';
+                    updated = true;
+                }
+                if (!t.schedule) {
+                    t.schedule = {
+                        type: 'daily',
+                        days: [],
+                        startDate: t.createdAt,
+                        endDate: null
+                    };
+                    updated = true;
+                }
+                if (!t.reminder) {
+                    t.reminder = {
+                        enabled: false,
+                        time: '18:00'
+                    };
                     updated = true;
                 }
             });
@@ -82,7 +100,6 @@ const Storage = {
             const data = localStorage.getItem(STORAGE_KEYS.CATEGORIES);
             const customCategories = data ? JSON.parse(data) : [];
             
-            // Merge predefined and custom categories without duplicates
             const combined = [...DEFAULT_CATEGORIES];
             customCategories.forEach(c => {
                 if (!combined.includes(c)) {
@@ -98,8 +115,6 @@ const Storage = {
 
     /**
      * Add a new custom category
-     * @param {string} categoryName 
-     * @returns {Array} Updated categories list
      */
     addCategory(categoryName) {
         if (!categoryName || !categoryName.trim()) {
@@ -127,7 +142,6 @@ const Storage = {
 
     /**
      * Get all daily records from LocalStorage
-     * @returns {Array} Array of daily record objects
      */
     getDailyRecords() {
         try {
@@ -141,7 +155,6 @@ const Storage = {
 
     /**
      * Save daily records to LocalStorage
-     * @param {Array} records Array of daily record objects
      */
     saveDailyRecords(records) {
         try {
@@ -152,8 +165,34 @@ const Storage = {
     },
 
     /**
+     * Triggered reminders log helpers (Duplicate Protection - Section 17)
+     */
+    getTriggeredReminders() {
+        try {
+            const data = localStorage.getItem(STORAGE_KEYS.TRIGGERED_REMINDERS);
+            return data ? JSON.parse(data) : [];
+        } catch (error) {
+            return [];
+        }
+    },
+
+    hasReminderBeenTriggered(key) {
+        const list = this.getTriggeredReminders();
+        return list.includes(key);
+    },
+
+    markReminderTriggered(key) {
+        const list = this.getTriggeredReminders();
+        if (!list.includes(key)) {
+            list.push(key);
+            try {
+                localStorage.setItem(STORAGE_KEYS.TRIGGERED_REMINDERS, JSON.stringify(list));
+            } catch (e) {}
+        }
+    },
+
+    /**
      * Get user settings (e.g., theme, userName)
-     * @returns {Object} Settings object
      */
     getSettings() {
         try {
@@ -171,7 +210,6 @@ const Storage = {
 
     /**
      * Save user settings to LocalStorage
-     * @param {Object} settings Settings object
      */
     saveSettings(settings) {
         try {
@@ -185,9 +223,6 @@ const Storage = {
 
     /**
      * Helper to get a specific daily record for a task and date
-     * @param {string} taskId Task ID
-     * @param {string} dateStr Date string YYYY-MM-DD
-     * @returns {Object|null} Daily record object or null
      */
     getRecord(taskId, dateStr) {
         const records = this.getDailyRecords();
@@ -196,12 +231,6 @@ const Storage = {
 
     /**
      * Save or update a single daily record
-     * Note: Daily records ONLY store status and note (Rule 23)
-     * @param {string} taskId Task ID
-     * @param {string} dateStr Date string YYYY-MM-DD
-     * @param {string} status 'completed' or 'not_completed'
-     * @param {string} note Daily note string
-     * @returns {Object} Updated/created record
      */
     saveRecord(taskId, dateStr, status, note) {
         const records = this.getDailyRecords();
@@ -259,7 +288,17 @@ const Storage = {
                 category: 'Study',
                 priority: 'high',
                 createdAt: yesterdayStr,
-                active: true
+                active: true,
+                schedule: {
+                    type: 'daily',
+                    days: [],
+                    startDate: yesterdayStr,
+                    endDate: null
+                },
+                reminder: {
+                    enabled: true,
+                    time: '18:00'
+                }
             },
             {
                 id: 'task_sample_2',
@@ -268,7 +307,17 @@ const Storage = {
                 category: 'Fitness',
                 priority: 'medium',
                 createdAt: yesterdayStr,
-                active: true
+                active: true,
+                schedule: {
+                    type: 'weekly',
+                    days: ['Mon', 'Wed', 'Fri'],
+                    startDate: yesterdayStr,
+                    endDate: null
+                },
+                reminder: {
+                    enabled: true,
+                    time: '07:00'
+                }
             },
             {
                 id: 'task_sample_3',
@@ -277,7 +326,17 @@ const Storage = {
                 category: 'Personal',
                 priority: 'low',
                 createdAt: yesterdayStr,
-                active: true
+                active: true,
+                schedule: {
+                    type: 'daily',
+                    days: [],
+                    startDate: yesterdayStr,
+                    endDate: null
+                },
+                reminder: {
+                    enabled: false,
+                    time: '21:00'
+                }
             },
             {
                 id: 'task_sample_4',
@@ -286,7 +345,17 @@ const Storage = {
                 category: 'Study',
                 priority: 'high',
                 createdAt: yesterdayStr,
-                active: true
+                active: true,
+                schedule: {
+                    type: 'daily',
+                    days: [],
+                    startDate: yesterdayStr,
+                    endDate: null
+                },
+                reminder: {
+                    enabled: false,
+                    time: '17:00'
+                }
             },
             {
                 id: 'task_sample_5',
@@ -295,7 +364,17 @@ const Storage = {
                 category: 'Project',
                 priority: 'medium',
                 createdAt: todayStr,
-                active: true
+                active: true,
+                schedule: {
+                    type: 'one_time',
+                    days: [],
+                    startDate: todayStr,
+                    endDate: null
+                },
+                reminder: {
+                    enabled: true,
+                    time: '20:00'
+                }
             }
         ];
 
