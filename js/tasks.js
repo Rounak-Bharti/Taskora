@@ -10,7 +10,17 @@ const TaskManager = {
      * @returns {boolean}
      */
     isTaskScheduledForDate(task, dateStr) {
-        if (!task || !task.active) return false;
+        if (!task) return false;
+
+        // If task was soft deleted, it must NOT appear on or after its deletion date
+        if (task.deletedAt && dateStr >= task.deletedAt) {
+            return false;
+        }
+
+        // Legacy inactive check if deletedAt is not explicitly set
+        if (!task.active && !task.deletedAt) {
+            return false;
+        }
 
         const schedule = task.schedule || { type: 'daily', days: [], startDate: task.createdAt, endDate: null };
         const startDate = schedule.startDate || task.createdAt;
@@ -145,14 +155,18 @@ const TaskManager = {
     },
 
     /**
-     * Soft delete a task (sets active = false)
+     * Soft delete a task (sets active = false and records deletion date)
+     * Preserves historical records from BEFORE deletion date, hides task from deletion date forward
      */
-    deleteTask(taskId) {
+    deleteTask(taskId, dateStr) {
         const tasks = Storage.getTasks();
         const taskIndex = tasks.findIndex(t => t.id === taskId);
 
         if (taskIndex !== -1) {
             tasks[taskIndex].active = false;
+            if (!tasks[taskIndex].deletedAt) {
+                tasks[taskIndex].deletedAt = dateStr || new Date().toISOString().split('T')[0];
+            }
             Storage.saveTasks(tasks);
         }
     },
@@ -383,7 +397,11 @@ const TaskManager = {
         const task = tasks.find(t => t.id === taskId);
         if (!task) return null;
 
-        const records = Storage.getDailyRecords().filter(r => r.taskId === taskId);
+        const records = Storage.getDailyRecords().filter(r => {
+            if (r.taskId !== taskId) return false;
+            if (task.deletedAt && r.date >= task.deletedAt) return false;
+            return true;
+        });
         records.sort((a, b) => b.date.localeCompare(a.date));
 
         const completedCount = records.filter(r => r.status === 'completed').length;
