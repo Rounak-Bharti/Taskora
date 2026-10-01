@@ -646,21 +646,6 @@ const App = {
             this.handleLogout();
         });
 
-        // Quick Demo Account Buttons
-        document.querySelectorAll('.btn-quick-demo').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const email = btn.getAttribute('data-email');
-                const pass = btn.getAttribute('data-pass');
-                const emailInput = document.getElementById('login-email');
-                const passInput = document.getElementById('login-password');
-                if (emailInput && passInput) {
-                    emailInput.value = email;
-                    passInput.value = pass;
-                    this.handleLoginSubmit();
-                }
-            });
-        });
-
         // Auth Card View Toggles
         document.getElementById('btn-show-signup')?.addEventListener('click', () => {
             document.getElementById('auth-card-login').style.display = 'none';
