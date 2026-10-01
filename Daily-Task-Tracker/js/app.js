@@ -993,7 +993,9 @@ const App = {
         if (timeWrapper) timeWrapper.style.display = 'none';
 
         if (modal) modal.classList.add('active');
-        document.getElementById('add-task-title')?.focus();
+        setTimeout(() => {
+            document.getElementById('add-task-title')?.focus({ preventScroll: true });
+        }, 100);
     },
 
     openEditModal(taskId) {
