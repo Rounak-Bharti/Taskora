@@ -438,75 +438,12 @@ const App = {
 
         // Render Calendar
         HistoryManager.renderCalendar(calContainer, this.todayDateStr, (selectedDateStr) => {
-            this.renderHistoryDateDetails(detailContainer, selectedDateStr);
+            HistoryManager.renderHistoryForDate(detailContainer, selectedDateStr, this.todayDateStr);
         });
 
         // Render initial details for selected date
-        this.renderHistoryDateDetails(detailContainer, HistoryManager.selectedDate || this.todayDateStr);
-    },
-
-    /**
-     * Render task details for a historical date
-     */
-    renderHistoryDateDetails(container, dateStr) {
-        const historyData = HistoryManager.getHistoryForDate(dateStr);
-        const formattedDate = this.formatFullDate(dateStr);
-
-        let tasksListHtml = '';
-        if (historyData.tasks.length === 0) {
-            tasksListHtml = `
-                <div class="empty-state-small">
-                    <p class="empty-text">No tasks existed on ${formattedDate}.</p>
-                </div>
-            `;
-        } else {
-            tasksListHtml = historyData.tasks.map(task => `
-                <div class="history-task-item ${task.status === 'completed' ? 'completed' : ''}">
-                    <div class="history-task-main">
-                        <span class="history-status-icon ${task.status === 'completed' ? 'check' : 'cross'}">
-                            ${task.status === 'completed' ? '✓' : '✗'}
-                        </span>
-                        <div>
-                            <h4 class="history-task-title">${this.escapeHtml(task.title)}</h4>
-                            ${task.description ? `<p class="history-task-desc">${this.escapeHtml(task.description)}</p>` : ''}
-                        </div>
-                    </div>
-                    ${task.note ? `
-                        <div class="history-task-note">
-                            <span class="note-tag">Note:</span> ${this.escapeHtml(task.note)}
-                        </div>
-                    ` : '<div class="history-task-note empty-note">No note recorded</div>'}
-                </div>
-            `).join('');
-        }
-
-        const html = `
-            <div class="history-date-header">
-                <h3>${formattedDate}</h3>
-                <span class="history-completion-badge">${historyData.percentage}% Completed</span>
-            </div>
-
-            <div class="history-summary-pills">
-                <div class="summary-pill completed-pill">
-                    <span class="pill-number">${historyData.completed}</span>
-                    <span class="pill-label">Completed</span>
-                </div>
-                <div class="summary-pill incomplete-pill">
-                    <span class="pill-number">${historyData.incomplete}</span>
-                    <span class="pill-label">Incomplete</span>
-                </div>
-                <div class="summary-pill total-pill">
-                    <span class="pill-number">${historyData.total}</span>
-                    <span class="pill-label">Total Tasks</span>
-                </div>
-            </div>
-
-            <div class="history-tasks-list">
-                ${tasksListHtml}
-            </div>
-        `;
-
-        container.innerHTML = html;
+        const initialDate = HistoryManager.selectedDate || this.todayDateStr;
+        HistoryManager.renderHistoryForDate(detailContainer, initialDate, this.todayDateStr);
     },
 
     /**
