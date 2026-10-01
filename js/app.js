@@ -145,13 +145,14 @@ const App = {
     /**
      * Update Header greeting & date displays
      */
-    updateHeaderInfo() {
+    updateHeaderInfo(displayNameOverride) {
         const settings = Storage.getSettings();
+        const userName = displayNameOverride || settings.userName || 'User';
         const greetingEl = document.getElementById('user-greeting');
         const headerDateEl = document.getElementById('header-today-date');
         const dashboardDateSub = document.getElementById('dashboard-date-sub');
 
-        if (greetingEl) greetingEl.textContent = this.getGreeting(settings.userName);
+        if (greetingEl) greetingEl.textContent = this.getGreeting(userName);
         const formatted = this.formatFullDate(this.todayDateStr);
         if (headerDateEl) headerDateEl.textContent = formatted;
         if (dashboardDateSub) dashboardDateSub.textContent = formatted;
@@ -189,7 +190,73 @@ const App = {
     /**
      * Firebase Auth State Listener & Initialization
      */
+    // Toggle flag to easily switch between Mock Auth (for testing) and Firebase Auth
+    useMockAuth: true,
+
+    /**
+     * Helper called when a user logs in (Mock or Firebase)
+     */
+    handleUserLoggedIn(user) {
+        Storage.setCurrentUserId(user.id || user.uid);
+
+        if (this.useMockAuth && typeof MockAuth !== 'undefined') {
+            MockAuth.seedDemoTasksIfEmpty(user.id || user.uid, user.name || user.displayName);
+        }
+
+        const emailBadge = document.getElementById('header-user-email');
+        const logoutBtn = document.getElementById('btn-header-logout');
+        const navContainer = document.querySelector('.nav-links');
+
+        if (emailBadge) {
+            emailBadge.textContent = user.email;
+            emailBadge.style.display = 'inline-block';
+        }
+        if (logoutBtn) logoutBtn.style.display = 'inline-flex';
+        if (navContainer) navContainer.style.display = 'flex';
+
+        const settings = Storage.getSettings();
+        if (!settings.userName || settings.userName === 'User') {
+            Storage.saveSettings({ userName: user.name || user.displayName || user.email.split('@')[0] }, false);
+        }
+
+        const displayName = user.name || user.displayName || settings.userName || (user.email ? user.email.split('@')[0] : 'User');
+        this.updateHeaderInfo(displayName);
+        this.populateCategoryDropdowns();
+        this.switchView('dashboard');
+    },
+
+    /**
+     * Helper called when a user logs out
+     */
+    handleUserLoggedOut() {
+        Storage.clearCurrentUserData();
+
+        const emailBadge = document.getElementById('header-user-email');
+        const logoutBtn = document.getElementById('btn-header-logout');
+        const navContainer = document.querySelector('.nav-links');
+
+        if (emailBadge) emailBadge.style.display = 'none';
+        if (logoutBtn) logoutBtn.style.display = 'none';
+        if (navContainer) navContainer.style.display = 'none';
+
+        this.updateHeaderInfo('Guest');
+        this.switchView('auth');
+    },
+
+    /**
+     * Auth State Listener & Initialization
+     */
     initAuth() {
+        if (this.useMockAuth && typeof MockAuth !== 'undefined') {
+            const user = MockAuth.getCurrentUser();
+            if (user) {
+                this.handleUserLoggedIn(user);
+            } else {
+                this.handleUserLoggedOut();
+            }
+            return;
+        }
+
         if (typeof auth === 'undefined' || !auth) {
             console.warn('Firebase Auth not available. Running in local fallback mode.');
             Storage.seedSampleData(false);
@@ -198,38 +265,17 @@ const App = {
         }
 
         auth.onAuthStateChanged(async (user) => {
-            const emailBadge = document.getElementById('header-user-email');
-            const logoutBtn = document.getElementById('btn-header-logout');
-            const navContainer = document.querySelector('.nav-links');
-
             if (user) {
-                // User logged in
+                // User logged in via Firebase
                 Storage.setCurrentUserId(user.uid);
-                
-                // Fetch & restore user data from Cloud Firestore
                 await Storage.loadUserDataFromFirestore(user.uid);
-
-                if (emailBadge) {
-                    emailBadge.textContent = user.email;
-                    emailBadge.style.display = 'inline-block';
-                }
-                if (logoutBtn) logoutBtn.style.display = 'inline-flex';
-                if (navContainer) navContainer.style.display = 'flex';
-
-                const displayName = user.displayName || (user.email ? user.email.split('@')[0] : 'User');
-                this.updateHeaderInfo(displayName);
-                this.populateCategoryDropdowns();
-                this.switchView('dashboard');
+                this.handleUserLoggedIn({
+                    id: user.uid,
+                    email: user.email,
+                    name: user.displayName || user.email.split('@')[0]
+                });
             } else {
-                // User logged out / not authenticated
-                Storage.clearCurrentUserData();
-
-                if (emailBadge) emailBadge.style.display = 'none';
-                if (logoutBtn) logoutBtn.style.display = 'none';
-                if (navContainer) navContainer.style.display = 'none';
-
-                this.updateHeaderInfo('Guest');
-                this.switchView('auth');
+                this.handleUserLoggedOut();
             }
         });
     },
@@ -245,6 +291,17 @@ const App = {
 
         if (!email || !password) {
             this.showToast('Please enter your email and password.', 'warning');
+            return;
+        }
+
+        if (this.useMockAuth && typeof MockAuth !== 'undefined') {
+            const result = MockAuth.login(email, password);
+            if (result.success) {
+                this.showToast(`✓ Welcome back, ${result.user.name}!`, 'success');
+                this.handleUserLoggedIn(result.user);
+            } else {
+                this.showToast(result.message, 'error');
+            }
             return;
         }
 
@@ -295,6 +352,17 @@ const App = {
 
         if (password.length < 6) {
             this.showToast('Password must be at least 6 characters long.', 'warning');
+            return;
+        }
+
+        if (this.useMockAuth && typeof MockAuth !== 'undefined') {
+            const result = MockAuth.signup(name, email, password);
+            if (result.success) {
+                this.showToast(`✓ Account created! Welcome, ${result.user.name}!`, 'success');
+                this.handleUserLoggedIn(result.user);
+            } else {
+                this.showToast(result.message, 'error');
+            }
             return;
         }
 
@@ -371,6 +439,13 @@ const App = {
             return;
         }
 
+        if (this.useMockAuth) {
+            this.showToast('Demo Mode: If an account exists, a reset link would be sent.', 'info');
+            document.getElementById('auth-card-forgot').style.display = 'none';
+            document.getElementById('auth-card-login').style.display = 'block';
+            return;
+        }
+
         if (typeof auth === 'undefined' || !auth) {
             this.showToast('Firebase Auth unavailable.', 'error');
             return;
@@ -397,6 +472,13 @@ const App = {
      * Handle User Logout
      */
     async handleLogout() {
+        if (this.useMockAuth && typeof MockAuth !== 'undefined') {
+            MockAuth.logout();
+            this.handleUserLoggedOut();
+            this.showToast('Logged out successfully.', 'info');
+            return;
+        }
+
         if (typeof auth === 'undefined' || !auth) return;
 
         try {
@@ -508,8 +590,13 @@ const App = {
      * View Switcher Navigation
      */
     switchView(viewName) {
-        // If Firebase Auth is available and user is not authenticated, force Auth view
-        if (typeof auth !== 'undefined' && auth && !auth.currentUser && viewName !== 'auth') {
+        // Enforce Auth view if user is not logged in
+        if (this.useMockAuth && typeof MockAuth !== 'undefined') {
+            const currentUser = MockAuth.getCurrentUser();
+            if (!currentUser && viewName !== 'auth') {
+                viewName = 'auth';
+            }
+        } else if (typeof auth !== 'undefined' && auth && !auth.currentUser && viewName !== 'auth') {
             viewName = 'auth';
         }
 
@@ -557,6 +644,21 @@ const App = {
         // Header Logout Button
         document.getElementById('btn-header-logout')?.addEventListener('click', () => {
             this.handleLogout();
+        });
+
+        // Quick Demo Account Buttons
+        document.querySelectorAll('.btn-quick-demo').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const email = btn.getAttribute('data-email');
+                const pass = btn.getAttribute('data-pass');
+                const emailInput = document.getElementById('login-email');
+                const passInput = document.getElementById('login-password');
+                if (emailInput && passInput) {
+                    emailInput.value = email;
+                    passInput.value = pass;
+                    this.handleLoginSubmit();
+                }
+            });
         });
 
         // Auth Card View Toggles
