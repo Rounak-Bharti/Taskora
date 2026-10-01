@@ -2316,3 +2316,75 @@ body {
     color: var(--text-muted);
     line-height: 1.5;
 }
+
+/* ==========================================
+   14. AUTHENTICATION & USER PROFILE STYLES
+   ========================================== */
+.auth-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: calc(100vh - 220px);
+    padding: 1.5rem;
+}
+
+.auth-card {
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 2.25rem;
+    width: 100%;
+    max-width: 440px;
+    box-shadow: var(--shadow-lg);
+}
+
+.auth-card-header {
+    text-align: center;
+    margin-bottom: 1.75rem;
+}
+
+.auth-card-header h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text-main);
+    margin-bottom: 0.375rem;
+}
+
+.auth-subtitle {
+    font-size: 0.875rem;
+    color: var(--text-muted);
+    line-height: 1.45;
+}
+
+.btn-block {
+    width: 100%;
+    margin-top: 0.5rem;
+}
+
+.auth-links-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 1.5rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.8125rem;
+}
+
+.auth-links-row.justify-center {
+    justify-content: center;
+}
+
+.user-badge {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--primary);
+    background-color: var(--primary-light);
+    padding: 0.375rem 0.875rem;
+    border-radius: var(--radius-full);
+    border: 1px solid rgba(79, 70, 229, 0.2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 180px;
+}
